@@ -127,7 +127,21 @@ pub const MeshComponent = struct {
 
 pub const Material = struct {
     // should also have the shader id
+    texture_id: ?usize,
     color: Color
+};
+
+pub const TextureColorMode = enum {
+    RGB,
+    RGBA
+};
+
+pub const Texture = struct {
+    data: []u8,
+    width: usize,
+    height: usize,
+    bit_depth: usize,
+    mode: TextureColorMode
 };
 
 pub const Mesh = struct {
@@ -184,8 +198,8 @@ pub const MaterialStore = struct {
     }
 
     /// Add a material to the store and return its id.
-    pub fn registerMaterial(self: *MaterialStore, color: Color) u32 {
-        self.materials.append(self.allocator, .{ .color = color }) catch @panic(out_of_memory);
+    pub fn registerMaterial(self: *MaterialStore, material: Material) usize {
+        self.materials.append(self.allocator, material) catch @panic(out_of_memory);
         return self.materials.items.len - 1;
     }
 
@@ -194,9 +208,46 @@ pub const MaterialStore = struct {
     }
 };
 
+/// Store materials for fast lookup
+pub const TextureStore = struct {
+    textures: std.ArrayList(Texture),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) TextureStore {
+        const textures = std.ArrayList(Texture).initCapacity(allocator, 16) catch @panic(out_of_memory);
+        return .{
+            .allocator = allocator,
+            .textures = textures 
+        };
+    }
+
+    pub fn deinit(self: *TextureStore) void {
+        self.textures.deinit(self.allocator);
+    }
+
+    /// Add a material to the store and return its id.
+    pub fn registerTexture(self: *TextureStore, texture: Texture) usize {
+        self.textures.append(self.allocator, texture) catch @panic(out_of_memory);
+        return self.textures.items.len - 1;
+    }
+
+    pub fn get(self: *TextureStore, texture_id: usize) Texture {
+        return self.textures.items[texture_id];
+    }
+};
+
 pub const Color = struct {
     r: f32,
     g: f32,
     b: f32,
-    a: f32
+    a: f32,
+
+    pub fn white() Color {
+        return .{
+            .r = 1.0,
+            .g = 1.0,
+            .b = 1.0,
+            .a = 1.0
+        };
+    }
 };

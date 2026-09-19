@@ -5,6 +5,7 @@ const World = @import("ecs.zig").World;
 const out_of_memory = ecs.out_of_memory;
 const RenderCommand = struct {
     mesh_id: usize,
+    material_id: usize,
     model_matrix: [16]f32
 };
 
@@ -100,11 +101,50 @@ pub const Renderer = struct {
         return c.glfwWindowShouldClose(self.window) != 0;
     }
 
-    pub fn draw(self: *Renderer, _: *ecs.MaterialStore, mesh_store: *ecs.MeshStore) void {
+    pub fn draw(self: *Renderer, material_store: *ecs.MaterialStore, mesh_store: *ecs.MeshStore, texture_store: *ecs.TextureStore) void {
         c.glClear(c.GL_COLOR_BUFFER_BIT);
         c.glUseProgram(self.program_id);
+
         for (self.render_queue.items) |cmd| {
             const mesh = mesh_store.get(cmd.mesh_id);
+            const material = material_store.get(cmd.material_id);
+            const maybe_texture = if (material.texture_id) |texture_id| texture_store.get(texture_id) else null;
+
+            const has_texture_loc = c.glGetUniformLocation(self.program_id, "u_HasTexture");
+            const color_loc = c.glGetUniformLocation(self.program_id, "u_Color");
+
+            c.glUniform1i(has_texture_loc, if (material.texture_id != null) 1 else 0);
+            c.glUniform4fv(color_loc, 1, &[_]f32{ material.color.r, material.color.g, material.color.b, material.color.a });
+
+            if (maybe_texture) |texture| {
+                var texture_id: u32 = 0;
+                c.glGenTextures(1, &texture_id);
+                c.glBindTexture(c.GL_TEXTURE_2D, texture_id);
+                c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_S, c.GL_REPEAT);
+                c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_T, c.GL_REPEAT);
+                c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_LINEAR);
+                c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_LINEAR);
+
+                const format = if (texture.mode == .RGB) c.GL_RGB else c.GL_RGBA;
+                c.glTexImage2D(
+                    c.GL_TEXTURE_2D,
+                    0,
+                    @intCast(format),
+                    @intCast(texture.width),
+                    @intCast(texture.height),
+                    0,
+                    @intCast(format),
+                    c.GL_UNSIGNED_BYTE,
+                    texture.data.ptr
+                );
+
+                c.glBindTexture(c.GL_TEXTURE_2D, texture_id);
+                c.glActiveTexture(c.GL_TEXTURE0);
+
+                const texture_loc = c.glGetUniformLocation(self.program_id, "u_Texture");
+                c.glUniform1i(texture_loc, 0);
+            }
+
             c.glBindVertexArray(mesh.vao);
             c.glUniformMatrix4fv(self.model_matrix_id, 1, c.GL_FALSE, &cmd.model_matrix);
             c.glDrawElements(c.GL_TRIANGLES, mesh.index_count, c.GL_UNSIGNED_INT, null);
@@ -146,7 +186,8 @@ pub const Renderer = struct {
         };
         self.render_queue.append(self.allocator, .{
             .model_matrix = model_matrix,
-            .mesh_id = mesh.mesh_id
+            .mesh_id = mesh.mesh_id,
+            .material_id = mesh.material_id
         }) catch @panic(out_of_memory);
     }
 
@@ -233,6 +274,7 @@ const vt_shader =
 \\  uniform mat4 u_ModelMatrix;
 \\  layout (location = 0) in vec3 position;
 \\  layout (location = 1) in vec2 uv;
+\\  out vec2 TexCoord;
 \\  void main() {
 \\      vec2 cameraPos = vec2(0, 0);
 \\      vec2 cameraDim = vec2(16, 9);
@@ -246,14 +288,23 @@ const vt_shader =
 \\      
 \\      vec4 screenPos = isoView * u_ModelMatrix * vec4(position, 1.0);
 \\      gl_Position = vec4(screenPos.xy, 0.0, 1.0);
+\\      TexCoord = uv;
 \\  }
 ;
 
 const ft_shader =
 \\  #version 330 core
 \\  layout (location = 0) out vec4 color;
+\\  uniform sampler2D u_Texture;
+\\  uniform int u_HasTexture;
+\\  uniform vec4 u_Color;
+\\  in vec2 TexCoord;
 \\  void main() {
-\\      color = vec4(1.0, 1.0, 1.0, 1.0);
+\\      vec4 finalColor = u_Color;
+\\      if (u_HasTexture == 1) {
+\\          finalColor *= texture(u_Texture, TexCoord);
+\\      }
+\\      color = finalColor;
 \\  }
 ;
 

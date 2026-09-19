@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 const c = @import("c");
 const math = @import("math.zig");
+const img = @import("img.zig");
 const rendering = @import("rendering.zig");
 const ecs = @import("ecs.zig");
 const World = ecs.World;
@@ -17,9 +18,28 @@ const frame_duration_ns: i64 = 1_000_000_000 / frame_rate;
 pub fn main(init: std.process.Init) !void {
     const arena_allocator = init.arena.allocator();
 
+    var png = img.PNG.parse(init.gpa, init.io, "snail_rgba.png") catch {
+        std.process.exit(1);
+    };
+    defer png.deinit();
+
     // Initialize stores
     var material_store = ecs.MaterialStore.init(arena_allocator);
     var mesh_store = ecs.MeshStore.init(arena_allocator);
+    var texture_store = ecs.TextureStore.init(arena_allocator);
+
+    const snail_id = texture_store.registerTexture(.{
+        .bit_depth = png.ihdr.bit_depth,
+        .height = png.ihdr.height,
+        .width = png.ihdr.width,
+        .mode = .RGB,
+        .data = png.raw_image
+    });
+
+    const mat_id = material_store.registerMaterial(.{
+        .color = .white(),
+        .texture_id = snail_id
+    });
 
     var world = World.init(init.gpa);
     defer world.deinit();
@@ -38,27 +58,9 @@ pub fn main(init: std.process.Init) !void {
     };
 
     const floor_mesh = ecs.MeshComponent {
-        .material_id = 0,
+        .material_id = mat_id,
         .mesh_id = floor_mesh_id
     };
-
-    const mat1 = math.Matrix4(u32).init(.{ 
-        .{ 1, 2, 3, 4 },
-        .{ 1, 2, 3, 4 },
-        .{ 1, 2, 3, 4 },
-        .{ 1, 2, 3, 4 } 
-    });
-
-    const mat2 = math.Matrix4(u32).init(.{
-        .{ 1, 0, 0, 0 },
-        .{ 0, 1, 0, 0 },
-        .{ 0, 0, 1, 0 },
-        .{ 0, 0, 0, 2 }
-    });
-
-    std.log.debug("{any}", .{ math.Matrix4(u32).multiply(mat1, mat2) });
-
-    std.log.debug("{any}", .{ math.Matrix4(u32).multiply(mat1, mat2).toArray() });
 
     const floor_1 = world.spawnEntity();
     world.addComponent(floor_1, transform);
@@ -83,7 +85,7 @@ pub fn main(init: std.process.Init) !void {
 
         renderer.update(&world);
 
-        renderer.draw(&material_store, &mesh_store);
+        renderer.draw(&material_store, &mesh_store, &texture_store);
 
         // Cap the frame rate
         const elapsed = frame_start.untilNow(init.io, .awake).toNanoseconds();
