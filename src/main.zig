@@ -21,25 +21,11 @@ pub fn main(init: std.process.Init) !void {
     var png = img.PNG.parse(init.gpa, init.io, "snail_rgba.png") catch {
         std.process.exit(1);
     };
-    defer png.deinit();
 
     // Initialize stores
     var material_store = ecs.MaterialStore.init(arena_allocator);
     var mesh_store = ecs.MeshStore.init(arena_allocator);
     var texture_store = ecs.TextureStore.init(arena_allocator);
-
-    const snail_id = texture_store.registerTexture(.{
-        .bit_depth = png.ihdr.bit_depth,
-        .height = png.ihdr.height,
-        .width = png.ihdr.width,
-        .mode = .RGB,
-        .data = png.raw_image
-    });
-
-    const mat_id = material_store.registerMaterial(.{
-        .color = .white(),
-        .texture_id = snail_id
-    });
 
     var world = World.init(init.gpa);
     defer world.deinit();
@@ -47,6 +33,21 @@ pub fn main(init: std.process.Init) !void {
     // Initialize systems
     var renderer = Renderer.init(init.gpa);
     defer renderer.deinit();
+
+    const snail_id = texture_store.registerTexture(.{
+        .texture_id = renderer.createTexture(.{
+            .color_mode = .RGB,
+            .width = png.ihdr.width,
+            .height = png.ihdr.height,
+            .data = png.raw_image
+        })
+    });
+    png.deinit();
+
+    const mat_id = material_store.registerMaterial(.{
+        .color = .white(),
+        .texture_id = snail_id
+    });
 
     const floor_vao, const floor_vbo, const floor_ebo, const index_count = renderer.createFloorBuffer();
     const floor_mesh_id = mesh_store.registerMesh(floor_vao, floor_vbo, floor_ebo, index_count);

@@ -14,8 +14,10 @@ pub const Renderer = struct {
     window: *c.struct_GLFWwindow,
     render_queue: std.ArrayList(RenderCommand),
     program_id: u32,
-    model_matrix_id: i32,
-
+    model_matrix_loc: i32,
+    has_texture_loc: i32,
+    texture_loc: i32,
+    color_loc: i32,
 
     pub fn init(allocator: std.mem.Allocator) Renderer {
         // Init window
@@ -74,7 +76,11 @@ pub const Renderer = struct {
         c.glLinkProgram(program_id);
         c.glValidateProgram(program_id);
 
-        const model_matrix_id = c.glGetUniformLocation(program_id, "u_ModelMatrix");
+        // Shader variables will belong to material in the future
+        const model_matrix_loc = c.glGetUniformLocation(program_id, "u_ModelMatrix");
+        const has_texture_loc = c.glGetUniformLocation(program_id, "u_HasTexture");
+        const texture_loc = c.glGetUniformLocation(program_id, "u_Texture");
+        const color_loc = c.glGetUniformLocation(program_id, "u_Color");
 
         // TODO: error handling
         std.log.info("Shader compilation complete.", .{});
@@ -86,7 +92,10 @@ pub const Renderer = struct {
             .window = window,
             .render_queue = render_queue,
             .program_id = program_id,
-            .model_matrix_id = model_matrix_id
+            .model_matrix_loc = model_matrix_loc,
+            .has_texture_loc = has_texture_loc,
+            .texture_loc = texture_loc,
+            .color_loc = color_loc
         };
     }
 
@@ -102,7 +111,7 @@ pub const Renderer = struct {
     }
 
     pub fn draw(self: *Renderer, material_store: *ecs.MaterialStore, mesh_store: *ecs.MeshStore, texture_store: *ecs.TextureStore) void {
-        c.glClear(c.GL_COLOR_BUFFER_BIT);
+        c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
         c.glUseProgram(self.program_id);
 
         for (self.render_queue.items) |cmd| {
@@ -110,43 +119,18 @@ pub const Renderer = struct {
             const material = material_store.get(cmd.material_id);
             const maybe_texture = if (material.texture_id) |texture_id| texture_store.get(texture_id) else null;
 
-            const has_texture_loc = c.glGetUniformLocation(self.program_id, "u_HasTexture");
-            const color_loc = c.glGetUniformLocation(self.program_id, "u_Color");
-
-            c.glUniform1i(has_texture_loc, if (material.texture_id != null) 1 else 0);
-            c.glUniform4fv(color_loc, 1, &[_]f32{ material.color.r, material.color.g, material.color.b, material.color.a });
+            // Assign uniforms
+            c.glUniform1i(self.has_texture_loc, if (material.texture_id != null) 1 else 0);
+            c.glUniform4fv(self.color_loc, 1, &[_]f32{ material.color.r, material.color.g, material.color.b, material.color.a });
+            c.glUniformMatrix4fv(self.model_matrix_loc, 1, c.GL_FALSE, &cmd.model_matrix);
 
             if (maybe_texture) |texture| {
-                var texture_id: u32 = 0;
-                c.glGenTextures(1, &texture_id);
-                c.glBindTexture(c.GL_TEXTURE_2D, texture_id);
-                c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_S, c.GL_REPEAT);
-                c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_T, c.GL_REPEAT);
-                c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_LINEAR);
-                c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_LINEAR);
-
-                const format = if (texture.mode == .RGB) c.GL_RGB else c.GL_RGBA;
-                c.glTexImage2D(
-                    c.GL_TEXTURE_2D,
-                    0,
-                    @intCast(format),
-                    @intCast(texture.width),
-                    @intCast(texture.height),
-                    0,
-                    @intCast(format),
-                    c.GL_UNSIGNED_BYTE,
-                    texture.data.ptr
-                );
-
-                c.glBindTexture(c.GL_TEXTURE_2D, texture_id);
                 c.glActiveTexture(c.GL_TEXTURE0);
-
-                const texture_loc = c.glGetUniformLocation(self.program_id, "u_Texture");
-                c.glUniform1i(texture_loc, 0);
+                c.glBindTexture(c.GL_TEXTURE_2D, texture.texture_id);
+                c.glUniform1i(self.texture_loc, 0);
             }
 
             c.glBindVertexArray(mesh.vao);
-            c.glUniformMatrix4fv(self.model_matrix_id, 1, c.GL_FALSE, &cmd.model_matrix);
             c.glDrawElements(c.GL_TRIANGLES, mesh.index_count, c.GL_UNSIGNED_INT, null);
         }
 
@@ -198,7 +182,7 @@ pub const Renderer = struct {
 
         const vertex_array = [_]f32 {
             0.0, 0.0, 0.0,   0.0, 0.0,
-            1.0, 0.0, 0.0,   0.0, 1.0,
+            1.0, 0.0, 0.0,   1.0, 0.0,
             1.0, 1.0, 0.0,   1.0, 1.0,
             0.0, 1.0, 0.0,   0.0, 1.0
         };
@@ -240,6 +224,47 @@ pub const Renderer = struct {
             index_array.len
         };
     }
+
+    /// Registers a texture_id for the data. No longer need the raw image after this is called. Returns the GL texture id
+    pub fn createTexture(_: *Renderer, texture: TextureData) u32 {
+        var texture_id: u32 = 0;
+        c.glGenTextures(1, &texture_id);
+        c.glBindTexture(c.GL_TEXTURE_2D, texture_id);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_S, c.GL_REPEAT);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_T, c.GL_REPEAT);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_LINEAR);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_LINEAR);
+
+        const format = if (texture.color_mode == ColorMode.RGB) c.GL_RGB else c.GL_RGBA;
+        c.glPixelStorei(c.GL_UNPACK_ALIGNMENT, 1);
+        c.glTexImage2D(
+            c.GL_TEXTURE_2D,
+            0,
+            @intCast(format),
+            @intCast(texture.width),
+            @intCast(texture.height),
+            0,
+            @intCast(format),
+            c.GL_UNSIGNED_BYTE,
+            texture.data.ptr
+        );
+
+        c.glBindTexture(c.GL_TEXTURE_2D, 0);
+
+        return texture_id;
+    }
+};
+
+pub const ColorMode = enum {
+    RGB,
+    RGBA
+};
+
+pub const TextureData = struct {
+    data: []u8,
+    width: usize,
+    height: usize,
+    color_mode: ColorMode
 };
 
 /// Creates and compiles a shader of s_type given a string

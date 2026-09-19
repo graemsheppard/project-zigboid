@@ -136,7 +136,7 @@ pub const PNG = struct {
                 continue;
             }
 
-            if (byte_idx > bytes_per_row) {
+            if (byte_idx >= scanline_size) {
                 byte_idx = 0;
                 scanline_idx += 1;
                 continue;
@@ -144,9 +144,9 @@ pub const PNG = struct {
 
             const cur_offset = scanline_idx * scanline_size + byte_idx;
 
-            const a = if (byte_idx >= bypp) uncompressed[cur_offset - bypp] else 0;
+            const a = if (byte_idx > bypp) uncompressed[cur_offset - bypp] else 0;
             const b = if (scanline_idx > 0) uncompressed[cur_offset - scanline_size] else 0;
-            const c = if (byte_idx >= bypp and scanline_idx > 0) uncompressed[cur_offset - scanline_size - bypp] else 0;
+            const c = if (byte_idx > bypp and scanline_idx > 0) uncompressed[cur_offset - scanline_size - bypp] else 0;
 
             const byte = uncompressed[cur_offset];
             uncompressed[cur_offset] = switch(filter_method) {

@@ -131,17 +131,8 @@ pub const Material = struct {
     color: Color
 };
 
-pub const TextureColorMode = enum {
-    RGB,
-    RGBA
-};
-
 pub const Texture = struct {
-    data: []u8,
-    width: usize,
-    height: usize,
-    bit_depth: usize,
-    mode: TextureColorMode
+    texture_id: u32
 };
 
 pub const Mesh = struct {
@@ -208,7 +199,7 @@ pub const MaterialStore = struct {
     }
 };
 
-/// Store materials for fast lookup
+/// Store textures for fast lookup. Note the lookup id is not currently the same as the GL texture id.
 pub const TextureStore = struct {
     textures: std.ArrayList(Texture),
     allocator: std.mem.Allocator,
@@ -225,7 +216,7 @@ pub const TextureStore = struct {
         self.textures.deinit(self.allocator);
     }
 
-    /// Add a material to the store and return its id.
+    /// Add a texture to the store and return its id.
     pub fn registerTexture(self: *TextureStore, texture: Texture) usize {
         self.textures.append(self.allocator, texture) catch @panic(out_of_memory);
         return self.textures.items.len - 1;
