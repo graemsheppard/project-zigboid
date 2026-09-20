@@ -7,6 +7,7 @@ const rendering = @import("rendering.zig");
 const ecs = @import("ecs.zig");
 const World = ecs.World;
 const Renderer = rendering.Renderer;
+const Camera = rendering.Camera;
 const TransformComponent = ecs.TransformComponent;
 const SpriteComponent = ecs.SpriteComponent;
 const Vector3 = math.Vector3;
@@ -31,7 +32,8 @@ pub fn main(init: std.process.Init) !void {
     defer world.deinit();
 
     // Initialize systems
-    var renderer = Renderer.init(init.gpa);
+    var camera = Camera.init(.{ 0, 0, 0 });
+    var renderer = Renderer.init(init.gpa, &camera);
     defer renderer.deinit();
 
     const snail_id = texture_store.registerTexture(.{
@@ -82,7 +84,10 @@ pub fn main(init: std.process.Init) !void {
         const maybe_floor_3_transform = world.getComponent(TransformComponent, floor_3);
         if (maybe_floor_3_transform) |floor_3_transform| {
             floor_3_transform.position.x += 0.01;
+            floor_3_transform.position.y += 0.01;
         }
+
+        camera.position[0] += 0.01;
 
         renderer.update(&world);
 

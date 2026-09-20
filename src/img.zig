@@ -166,9 +166,10 @@ pub const PNG = struct {
 
         // For RGB and RGBA, copy the scanlines directly without the filter byte
         if (ihdr.color_type == 2 or ihdr.color_type == 6) {
-            for (0..ihdr.height) |y_idx| {
-                const source_start_idx = y_idx * (bytes_per_row + 1) + 1;
-                const target_start_idx = y_idx * bytes_per_row;
+            for (0..ihdr.height) |y_idx_source| {
+                const y_idx_target = ihdr.height - 1 - y_idx_source;
+                const source_start_idx = y_idx_source * (bytes_per_row + 1) + 1;
+                const target_start_idx = y_idx_target * bytes_per_row;
                 @memcpy(raw_image[target_start_idx..(target_start_idx + bytes_per_row)], uncompressed[source_start_idx..(source_start_idx + bytes_per_row)]);
             }
         }

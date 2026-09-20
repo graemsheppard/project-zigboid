@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @import("c");
 const ecs = @import("ecs.zig");
+const math = @import("math.zig");
 const World = @import("ecs.zig").World;
 const out_of_memory = ecs.out_of_memory;
 const RenderCommand = struct {
@@ -9,17 +10,48 @@ const RenderCommand = struct {
     model_matrix: [16]f32
 };
 
+pub const Camera = struct {
+    position: @Vector(3, f32),
+
+    pub fn init(position: @Vector(3, f32)) Camera {
+        return .{
+            .position = position
+        };
+    }
+
+    pub fn getViewMatrix(self: *Camera) math.Matrix4(f32) {
+        const translation = math.Matrix4(f32).init(.{
+            .{ 1.0, 0.0, 0.0, 0.0 },
+            .{ 0.0, 1.0, 0.0, 0.0 },
+            .{ 0.0, 0.0, 1.0, 0.0 },
+            .{ -self.position[0], -self.position[1], -self.position[2], 1.0 }
+        });
+
+        const rotation = math.Matrix4(f32).init(.{
+            .{ 0.707106, -0.408248,  0.577350, 0 },
+            .{ 0.707106,  0.408248, -0.577350, 0 },
+            .{ 0.0,       0.816496,  0.577350, 0 },
+            .{ 0.0, 0.0, 0.0, 1.0 }
+        });
+
+        return translation.multiply(rotation);
+    }
+};
+
 pub const Renderer = struct {
     allocator: std.mem.Allocator,
+    camera: *Camera,
     window: *c.struct_GLFWwindow,
     render_queue: std.ArrayList(RenderCommand),
     program_id: u32,
     model_matrix_loc: i32,
+    view_matrix_loc: i32,
+    proj_matrix_loc: i32,
     has_texture_loc: i32,
     texture_loc: i32,
     color_loc: i32,
 
-    pub fn init(allocator: std.mem.Allocator) Renderer {
+    pub fn init(allocator: std.mem.Allocator, camera: *Camera) Renderer {
         // Init window
         if (c.glfwInit() == 0) {
             std.log.err("Failed to intialize GLFW. Exiting...", .{});
@@ -78,6 +110,8 @@ pub const Renderer = struct {
 
         // Shader variables will belong to material in the future
         const model_matrix_loc = c.glGetUniformLocation(program_id, "u_ModelMatrix");
+        const view_matrix_loc = c.glGetUniformLocation(program_id, "u_ViewMatrix");
+        const proj_matrix_loc = c.glGetUniformLocation(program_id, "u_ProjMatrix");
         const has_texture_loc = c.glGetUniformLocation(program_id, "u_HasTexture");
         const texture_loc = c.glGetUniformLocation(program_id, "u_Texture");
         const color_loc = c.glGetUniformLocation(program_id, "u_Color");
@@ -89,10 +123,13 @@ pub const Renderer = struct {
 
         return .{
             .allocator = allocator,
+            .camera = camera,
             .window = window,
             .render_queue = render_queue,
             .program_id = program_id,
             .model_matrix_loc = model_matrix_loc,
+            .view_matrix_loc = view_matrix_loc,
+            .proj_matrix_loc = proj_matrix_loc,
             .has_texture_loc = has_texture_loc,
             .texture_loc = texture_loc,
             .color_loc = color_loc
@@ -113,6 +150,18 @@ pub const Renderer = struct {
     pub fn draw(self: *Renderer, material_store: *ecs.MaterialStore, mesh_store: *ecs.MeshStore, texture_store: *ecs.TextureStore) void {
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
         c.glUseProgram(self.program_id);
+        var view_matrix = self.camera.getViewMatrix();
+
+        const width: i32 = 16;
+        const height: i32 = 9;
+        //c.glfwGetWindowSize(self.window, &width, &height);
+
+        var proj_matrix = [16]f32 {
+            2.0 / @as(f32, @floatFromInt(width)), 0.0, 0.0, 0.0,
+            0.0, 2.0 / @as(f32, @floatFromInt(height)), 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0
+        };
 
         for (self.render_queue.items) |cmd| {
             const mesh = mesh_store.get(cmd.mesh_id);
@@ -123,6 +172,8 @@ pub const Renderer = struct {
             c.glUniform1i(self.has_texture_loc, if (material.texture_id != null) 1 else 0);
             c.glUniform4fv(self.color_loc, 1, &[_]f32{ material.color.r, material.color.g, material.color.b, material.color.a });
             c.glUniformMatrix4fv(self.model_matrix_loc, 1, c.GL_FALSE, &cmd.model_matrix);
+            c.glUniformMatrix4fv(self.view_matrix_loc, 1, c.GL_FALSE, &view_matrix.toArray() );
+            c.glUniformMatrix4fv(self.proj_matrix_loc, 1, c.GL_FALSE, &proj_matrix );
 
             if (maybe_texture) |texture| {
                 c.glActiveTexture(c.GL_TEXTURE0);
@@ -297,21 +348,13 @@ const vt_shader =
 \\  #version 330 core
 \\  uniform ivec2 u_WindowSize;
 \\  uniform mat4 u_ModelMatrix;
+\\  uniform mat4 u_ViewMatrix;
+\\  uniform mat4 u_ProjMatrix;
 \\  layout (location = 0) in vec3 position;
 \\  layout (location = 1) in vec2 uv;
 \\  out vec2 TexCoord;
 \\  void main() {
-\\      vec2 cameraPos = vec2(0, 0);
-\\      vec2 cameraDim = vec2(16, 9);
-\\
-\\      mat4 isoView = mat4(
-\\          vec4( 0.707106, -0.408248,  0.577350, 0),
-\\          vec4( 0.707106,  0.408248, -0.577350, 0),
-\\          vec4( 0.0,       0.816496,  0.577350, 0),
-\\          vec4( 0.0, 0.0, 0.0, 1.0)
-\\      );
-\\      
-\\      vec4 screenPos = isoView * u_ModelMatrix * vec4(position, 1.0);
+\\      vec4 screenPos = u_ProjMatrix * u_ViewMatrix * u_ModelMatrix * vec4(position, 1.0);
 \\      gl_Position = vec4(screenPos.xy, 0.0, 1.0);
 \\      TexCoord = uv;
 \\  }
