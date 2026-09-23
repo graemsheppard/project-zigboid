@@ -10,6 +10,7 @@ pub const PNG = struct {
     chunks: std.ArrayList(Chunk),
     bytes_per_row: u32,
     raw_image: []u8,
+    color_mode: ColorMode,
 
 
     // Parses a PNG file in the resources directory and decompresses the image data
@@ -77,9 +78,7 @@ pub const PNG = struct {
             byte_offset += chunk.data.len;
         }
 
-        const decompressed = try decompress(allocator, ihdr, bytes_per_row, compressed_data);
-
-        return .{
+        var self = PNG {
             .file_name = file_name,
             .allocator = allocator,
             .ihdr = ihdr,
@@ -87,11 +86,26 @@ pub const PNG = struct {
             .trns = trns,
             .chunks = chunks,
             .bytes_per_row = bytes_per_row,
-            .raw_image = decompressed
+            .raw_image = undefined,
+            .color_mode = .RGB
+        };
+
+        const decompressed = try self.decompress(allocator, compressed_data);
+        self.raw_image = decompressed;
+        self.color_mode = if (self.hasTransparency()) .RGBA else .RGB;
+        return self;
+    }
+
+    pub fn hasTransparency(self: *PNG) bool {
+        return switch(self.ihdr.color_type) {
+            0, 3 => self.trns != null,
+            4, 6 => true,
+            else => false
         };
     }
 
-    // Helper function to load an image by file_name. Returns raw buffer holding entire file data (compressed). Caller owns the memory.
+    /// Helper function to load an image by file_name. Returns raw buffer holding entire file data (compressed). Caller owns the memory.
+    /// File size limit of 64MiB
     fn loadImage(allocator: std.mem.Allocator, io: std.Io, file_name: []const u8) FileFormatError![]u8 {
         var resource_dir = std.Io.Dir.cwd().openDir(
             io,
@@ -110,7 +124,7 @@ pub const PNG = struct {
     }
 
     /// Helper function that decompresses the zlib stream, unfilters the pixels, and maps the correct colors, caller owns the allocated slice
-    fn decompress(allocator: std.mem.Allocator, ihdr: IHDR, bytes_per_row: usize, data: []u8) FileFormatError![]u8 {
+    fn decompress(self: *PNG, allocator: std.mem.Allocator, data: []u8) FileFormatError![]u8 {
         // Decompress the bytes
         var buf: [std.compress.flate.max_window_len]u8 = undefined;
         var data_reader = std.Io.Reader.fixed(data);
@@ -119,9 +133,12 @@ pub const PNG = struct {
         defer writer.deinit();
         _ = decomp.reader.streamRemaining(&writer.writer) catch return FileFormatError.CorruptedData;
         const uncompressed = writer.toOwnedSlice() catch @panic(out_of_memory);
+        const bytes_per_row = self.bytes_per_row;
+        const ihdr = self.ihdr;
         defer allocator.free(uncompressed);
 
-        var raw_image = allocator.alloc(u8, bytes_per_row * ihdr.height) catch return FileFormatError.CorruptedData;
+        const bypp_target = ihdr.getBytesPerPixel(self.trns != null);
+        var raw_image = allocator.alloc(u8, bypp_target * ihdr.height * ihdr.width) catch return FileFormatError.CorruptedData;
 
         // Unfilter the data in place
         var scanline_idx: usize = 0;
@@ -162,7 +179,24 @@ pub const PNG = struct {
         }
 
         // Handle different color types
-        if (ihdr.color_type == 3) unreachable;
+        if (ihdr.color_type == 3) {
+            const plte = self.plte orelse return FileFormatError.MissingField;
+            var source_idx: usize = 1;
+            var target_idx: usize = 0;
+            while (source_idx < uncompressed.len) {
+                if (source_idx % scanline_size == 0) {
+                    source_idx += 1;
+                    continue;
+                }
+
+                const plte_idx = uncompressed[source_idx];
+                const values = plte.colors[plte_idx];
+                const target = raw_image[target_idx..][0..3];
+                @memcpy(target, &values);
+                source_idx += 1;
+                target_idx += bypp_target; 
+            }
+        }
 
         // For RGB and RGBA, copy the scanlines directly without the filter byte
         if (ihdr.color_type == 2 or ihdr.color_type == 6) {
@@ -233,16 +267,34 @@ pub const IHDR = struct {
         };
     }
 
+    /// Gets the number of bits per pixel used by the raw image data
     fn getBitsPerPixel(self: IHDR) u8 {
         return switch(self.color_type) {
             0, 3 => self.bit_depth,     // Grayscale, Indexed(Palette)
             2 => self.bit_depth * 3,    // RGB
             4 => self.bit_depth * 2,    // Grayscale w/ alpha
-            5 => self.bit_depth * 4,    // RGBA
+            6 => self.bit_depth * 4,    // RGBA
             else => unreachable
         };
     }
 
+    /// Gets the number of bytes required per pixel in the output data. For truecolor this is the same as bits per pixel. 
+    /// For PLTE and Grayscale with transparency it will be larger.
+    fn getBytesPerPixel(self: IHDR, has_transparency: bool) u8 {
+        const extra = if (has_transparency) self.bit_depth else 0;
+        const bits = switch(self.color_type) {
+            0 => self.bit_depth + extra,      // Grayscale
+            2 => self.bit_depth * 3,          // RGB
+            3 => self.bit_depth * 3 + extra,  // PLTE
+            4 => self.bit_depth * 2,          // Grayscale w/ alpha
+            6 => self.bit_depth * 4,          // RGBA
+            else => unreachable
+        };
+
+        return (bits + 7) / 8;
+    }
+
+    /// Checks if the combination of bit_depth and color_type are valid by RFC-2083
     fn isColorSpecValid(bit_depth: u8, color_type: u8) bool {
         return switch (color_type) {
             0 => switch(bit_depth) { 1, 2, 4, 8, 16 => true, else => false },
@@ -317,3 +369,9 @@ pub const FileFormatError = error {
     InvalidHuffmanCode,
     FileNotFound
 };
+
+pub const ColorMode = enum {
+    RGB,
+    RGBA
+};
+

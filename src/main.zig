@@ -19,7 +19,7 @@ const frame_duration_ns: i64 = 1_000_000_000 / frame_rate;
 pub fn main(init: std.process.Init) !void {
     const arena_allocator = init.arena.allocator();
 
-    var png = img.PNG.parse(init.gpa, init.io, "snail_rgba.png") catch {
+    var png = img.PNG.parse(init.gpa, init.io, "snail_plte.png") catch {
         std.process.exit(1);
     };
 
@@ -38,7 +38,7 @@ pub fn main(init: std.process.Init) !void {
 
     const snail_id = texture_store.registerTexture(.{
         .texture_id = renderer.createTexture(.{
-            .color_mode = .RGB,
+            .color_mode = png.color_mode,
             .width = png.ihdr.width,
             .height = png.ihdr.height,
             .data = png.raw_image

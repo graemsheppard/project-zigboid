@@ -2,8 +2,10 @@ const std = @import("std");
 const c = @import("c");
 const ecs = @import("ecs.zig");
 const math = @import("math.zig");
+const img = @import("img.zig");
 const World = @import("ecs.zig").World;
 const out_of_memory = ecs.out_of_memory;
+const ColorMode = img.ColorMode;
 const RenderCommand = struct {
     mesh_id: usize,
     material_id: usize,
@@ -304,11 +306,6 @@ pub const Renderer = struct {
 
         return texture_id;
     }
-};
-
-pub const ColorMode = enum {
-    RGB,
-    RGBA
 };
 
 pub const TextureData = struct {
