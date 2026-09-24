@@ -6,6 +6,7 @@ const img = @import("img.zig");
 const World = @import("ecs.zig").World;
 const out_of_memory = ecs.out_of_memory;
 const ColorMode = img.ColorMode;
+const GameState = ecs.GameState;
 const RenderCommand = struct {
     mesh_id: usize,
     material_id: usize,
@@ -53,7 +54,7 @@ pub const Renderer = struct {
     texture_loc: i32,
     color_loc: i32,
 
-    pub fn init(allocator: std.mem.Allocator, camera: *Camera) Renderer {
+    pub fn init(allocator: std.mem.Allocator, camera: *Camera, game_state: *GameState) Renderer {
         // Init window
         if (c.glfwInit() == 0) {
             std.log.err("Failed to intialize GLFW. Exiting...", .{});
@@ -75,6 +76,8 @@ pub const Renderer = struct {
         };
 
         c.glfwMakeContextCurrent(window);
+        game_state.window = window;
+
         if (c.gladLoadGLLoader(@ptrCast(&c.glfwGetProcAddress)) == 0) {
             std.log.err("Failed to load GLAD. Exiting...", .{});
             std.process.exit(1);

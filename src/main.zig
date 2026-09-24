@@ -5,6 +5,7 @@ const math = @import("math.zig");
 const img = @import("img.zig");
 const rendering = @import("rendering.zig");
 const ecs = @import("ecs.zig");
+const control = @import("control.zig");
 const World = ecs.World;
 const Renderer = rendering.Renderer;
 const Camera = rendering.Camera;
@@ -12,12 +13,18 @@ const TransformComponent = ecs.TransformComponent;
 const SpriteComponent = ecs.SpriteComponent;
 const Vector3 = math.Vector3;
 const Color = ecs.Color;
+const ControlSystem = control.ControlSystem;
+const GameState = ecs.GameState;
 
 const frame_rate: i64 = 30;
 const frame_duration_ns: i64 = 1_000_000_000 / frame_rate;
 
 pub fn main(init: std.process.Init) !void {
     const arena_allocator = init.arena.allocator();
+    var game_state = GameState {
+        .window = undefined,
+        .player_id = undefined
+    };
 
     var png = img.PNG.parse(init.gpa, init.io, "snail_plte.png") catch {
         std.process.exit(1);
@@ -33,7 +40,8 @@ pub fn main(init: std.process.Init) !void {
 
     // Initialize systems
     var camera = Camera.init(.{ 0, 0, 0 });
-    var renderer = Renderer.init(init.gpa, &camera);
+    var renderer = Renderer.init(init.gpa, &camera, &game_state);
+    var control_system = ControlSystem {};
     defer renderer.deinit();
 
     const snail_id = texture_store.registerTexture(.{
@@ -49,6 +57,14 @@ pub fn main(init: std.process.Init) !void {
     const mat_id = material_store.registerMaterial(.{
         .color = .white(),
         .texture_id = snail_id
+    });
+
+    const player_id = world.spawnEntity();
+    game_state.player_id = player_id;
+    world.addComponent(player_id, TransformComponent {
+        .position = Vector3(f32).zero(),
+        .rotation = Vector3(f32).zero(),
+        .scale = Vector3(f32).one()
     });
 
     const floor_vao, const floor_vbo, const floor_ebo, const index_count = renderer.createFloorBuffer();
@@ -87,8 +103,11 @@ pub fn main(init: std.process.Init) !void {
             floor_3_transform.position.y += 0.01;
         }
 
-        camera.position[0] += 0.01;
+        // Testing only
+        const player_pos = world.getComponent(TransformComponent, player_id) orelse @panic("aa");
+        camera.position = .{ player_pos.position.x, player_pos.position.y, player_pos.position.z };
 
+        control_system.update(&world, &game_state);
         renderer.update(&world);
 
         renderer.draw(&material_store, &mesh_store, &texture_store);

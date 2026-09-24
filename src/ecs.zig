@@ -1,15 +1,15 @@
 const std = @import("std");
 const Vector3 = @import("math.zig").Vector3;
+const Window = @import("c").struct_GLFWwindow;
 
 const initial_capacity = 64;
 pub const out_of_memory = "Program ran out of memory!";
 
-pub const ComponentType = enum(usize) {
-    transform = 0,
-    sprite = 1
+/// For storing persistent and frequently accessed entities and state that are shared between systems
+pub const GameState = struct {
+    window: *Window,
+    player_id: usize
 };
-
-const type_count = @typeInfo(ComponentType).@"enum".fields.len;
 
 /// A container for all entities and components
 pub const World = struct {
@@ -18,6 +18,7 @@ pub const World = struct {
     transform_list: std.ArrayList(?TransformComponent),
     sprite_list: std.ArrayList(?SpriteComponent),
     mesh_list: std.ArrayList(?MeshComponent),
+    input_list: std.ArrayList(?InputComponent),
 
 
     pub fn init(allocator: std.mem.Allocator) World {
@@ -27,7 +28,8 @@ pub const World = struct {
             .allocator = allocator,
             .transform_list = std.ArrayList(?TransformComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
             .sprite_list = std.ArrayList(?SpriteComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
-            .mesh_list = std.ArrayList(?MeshComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory)
+            .mesh_list = std.ArrayList(?MeshComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
+            .input_list = std.ArrayList(?InputComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory)
         };
     }
 
@@ -35,6 +37,7 @@ pub const World = struct {
         self.transform_list.deinit(self.allocator);
         self.sprite_list.deinit(self.allocator);
         self.mesh_list.deinit(self.allocator);
+        self.input_list.deinit(self.allocator);
     }
 
     /// Given a component type T returns a pointer to its appropriate component array
@@ -42,6 +45,7 @@ pub const World = struct {
         if (T == SpriteComponent) return &self.sprite_list;
         if (T == TransformComponent) return &self.transform_list;
         if (T == MeshComponent) return &self.mesh_list;
+        if (T == InputComponent) return &self.input_list;
         @compileError("Not a supported component type: " ++ @typeName(T));
     } 
 
@@ -54,6 +58,7 @@ pub const World = struct {
         self.transform_list.append(self.allocator, null) catch @panic(out_of_memory);
         self.sprite_list.append(self.allocator, null) catch @panic(out_of_memory);
         self.mesh_list.append(self.allocator, null) catch @panic(out_of_memory);
+        self.input_list.append(self.allocator, null) catch @panic(out_of_memory);
 
         return entity_id;
     }
@@ -123,6 +128,10 @@ pub const SpriteComponent = struct {
 pub const MeshComponent = struct {
     material_id: usize,
     mesh_id: usize
+};
+
+pub const InputComponent = struct {
+    direction: @Vector(3, f32)
 };
 
 pub const Material = struct {
