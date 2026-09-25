@@ -8,7 +8,8 @@ pub const out_of_memory = "Program ran out of memory!";
 /// For storing persistent and frequently accessed entities and state that are shared between systems
 pub const GameState = struct {
     window: *Window,
-    player_id: usize
+    player_id: usize,
+    dt: f32
 };
 
 /// A container for all entities and components
@@ -178,7 +179,6 @@ pub const MeshStore = struct {
         return self.meshes.items[mesh_id];
     }
 };
-
 
 /// Store materials for fast lookup
 pub const MaterialStore = struct {

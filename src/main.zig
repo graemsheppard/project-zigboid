@@ -10,6 +10,7 @@ const World = ecs.World;
 const Renderer = rendering.Renderer;
 const Camera = rendering.Camera;
 const TransformComponent = ecs.TransformComponent;
+const InputComponent = ecs.InputComponent;
 const SpriteComponent = ecs.SpriteComponent;
 const Vector3 = math.Vector3;
 const Color = ecs.Color;
@@ -23,10 +24,11 @@ pub fn main(init: std.process.Init) !void {
     const arena_allocator = init.arena.allocator();
     var game_state = GameState {
         .window = undefined,
-        .player_id = undefined
+        .player_id = undefined,
+        .dt = @as(f32, @floatFromInt(frame_duration_ns)) / 1_000_000_000
     };
 
-    var png = img.PNG.parse(init.gpa, init.io, "snail_plte.png") catch {
+    var png = img.PNG.parse(init.gpa, init.io, "dirt.png") catch {
         std.process.exit(1);
     };
 
@@ -39,8 +41,7 @@ pub fn main(init: std.process.Init) !void {
     defer world.deinit();
 
     // Initialize systems
-    var camera = Camera.init(.{ 0, 0, 0 });
-    var renderer = Renderer.init(init.gpa, &camera, &game_state);
+    var renderer = Renderer.init(init.gpa, &game_state);
     var control_system = ControlSystem {};
     defer renderer.deinit();
 
@@ -61,6 +62,7 @@ pub fn main(init: std.process.Init) !void {
 
     const player_id = world.spawnEntity();
     game_state.player_id = player_id;
+    world.addComponent(player_id, InputComponent { .direction = .{ 0.0, 0.0, 0.0 }});
     world.addComponent(player_id, TransformComponent {
         .position = Vector3(f32).zero(),
         .rotation = Vector3(f32).zero(),
@@ -93,22 +95,16 @@ pub fn main(init: std.process.Init) !void {
     world.addComponent(floor_3, TransformComponent { .position = .{ .x = -1.0, .y = -1.0, .z = 0.0 }, .rotation = Vector3(f32).zero(), .scale = Vector3(f32).one() });
     world.addComponent(floor_3, floor_mesh);
 
+    const floor_4 = world.spawnEntity();
+    world.addComponent(floor_4, TransformComponent { .position = .{ .x = 0.0, .y = -1.0, .z = 0.0 }, .rotation = Vector3(f32).zero(), .scale = Vector3(f32).one() });
+    world.addComponent(floor_4, floor_mesh);
+
     // The main game loop
     while (!renderer.shouldClose()) {
         const frame_start = std.Io.Clock.awake.now(init.io);
         
-        const maybe_floor_3_transform = world.getComponent(TransformComponent, floor_3);
-        if (maybe_floor_3_transform) |floor_3_transform| {
-            floor_3_transform.position.x += 0.01;
-            floor_3_transform.position.y += 0.01;
-        }
-
-        // Testing only
-        const player_pos = world.getComponent(TransformComponent, player_id) orelse @panic("aa");
-        camera.position = .{ player_pos.position.x, player_pos.position.y, player_pos.position.z };
-
         control_system.update(&world, &game_state);
-        renderer.update(&world);
+        renderer.update(&world, &game_state);
 
         renderer.draw(&material_store, &mesh_store, &texture_store);
 
@@ -117,8 +113,10 @@ pub fn main(init: std.process.Init) !void {
         if (elapsed < frame_duration_ns) {
             const surplus = frame_duration_ns - elapsed;
             try std.Io.sleep(init.io, .{ .nanoseconds = surplus }, .awake);
+            game_state.dt = @as(f32, @floatFromInt(frame_duration_ns)) / 1_000_000_000;
+        } else {
+            game_state.dt = @as(f32, @floatFromInt(elapsed)) / 1_000_000_000;
         }
-
     }
 
     std.log.info("Program exited without error", .{});

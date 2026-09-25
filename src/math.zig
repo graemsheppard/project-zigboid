@@ -104,8 +104,45 @@ pub fn Matrix4(comptime T: type) type {
             return @bitCast(self.data);
         }
 
+        pub fn rotateX(theta: T) Self {
+            return Self.init(.{
+                .{ 1, 0, 0, 0 },
+                .{ 0, @cos(theta), -@sin(theta), 0 },
+                .{ 0, @sin(theta), @cos(theta), 0 },
+                .{ 0, 0, 0, 1 }
+            });
+        }
+
+        pub fn rotateY(theta: T) Self {
+            return Self.init(.{
+                .{ @cos(theta), 0, @sin(theta), 0 },
+                .{ 0, 1, 0, 0 },
+                .{ -@sin(theta), 0, @cos(theta), 0 },
+                .{ 0, 0, 0, 1 }
+            });
+        }
+
+        pub fn rotateZ(theta: T) Self {
+            return Self.init(.{
+                .{ @cos(theta), -@sin(theta), 0, 0 },
+                .{ @sin(theta), @cos(theta), 0, 0 },
+                .{ 0, 0, 1, 0 },
+                .{ 0, 0, 0, 1 }
+            });
+        }
+
+        pub fn identity() Self {
+            return Self.init(.{
+                .{ 1, 0, 0, 0 },
+                .{ 0, 1, 0, 0 },
+                .{ 0, 0, 1, 0 },
+                .{ 0, 0, 0, 1 }
+            });
+        }
+
         fn dot(a: Row, b: Row) T {
             return @reduce(.Add, a * b);
         }
+
     };
 }

@@ -7,6 +7,10 @@ const World = @import("ecs.zig").World;
 const out_of_memory = ecs.out_of_memory;
 const ColorMode = img.ColorMode;
 const GameState = ecs.GameState;
+const TransformComponent = ecs.TransformComponent;
+const MeshComponent = ecs.MeshComponent;
+const Mesh = ecs.Mesh;
+const Matrix4 = math.Matrix4;
 const RenderCommand = struct {
     mesh_id: usize,
     material_id: usize,
@@ -43,7 +47,7 @@ pub const Camera = struct {
 
 pub const Renderer = struct {
     allocator: std.mem.Allocator,
-    camera: *Camera,
+    camera: Camera,
     window: *c.struct_GLFWwindow,
     render_queue: std.ArrayList(RenderCommand),
     program_id: u32,
@@ -54,7 +58,7 @@ pub const Renderer = struct {
     texture_loc: i32,
     color_loc: i32,
 
-    pub fn init(allocator: std.mem.Allocator, camera: *Camera, game_state: *GameState) Renderer {
+    pub fn init(allocator: std.mem.Allocator, game_state: *GameState) Renderer {
         // Init window
         if (c.glfwInit() == 0) {
             std.log.err("Failed to intialize GLFW. Exiting...", .{});
@@ -121,6 +125,8 @@ pub const Renderer = struct {
         const texture_loc = c.glGetUniformLocation(program_id, "u_Texture");
         const color_loc = c.glGetUniformLocation(program_id, "u_Color");
 
+        const camera = Camera.init(.{ 0.0, 0.0, 0.0 });
+
         // TODO: error handling
         std.log.info("Shader compilation complete.", .{});
 
@@ -159,7 +165,6 @@ pub const Renderer = struct {
 
         const width: i32 = 16;
         const height: i32 = 9;
-        //c.glfwGetWindowSize(self.window, &width, &height);
 
         var proj_matrix = [16]f32 {
             2.0 / @as(f32, @floatFromInt(width)), 0.0, 0.0, 0.0,
@@ -197,14 +202,21 @@ pub const Renderer = struct {
     }
 
     /// Submits the drawable entities to the render queue
-    pub fn update(self: *Renderer, world: *World) void {
-        const entities_to_submit = world.queryEntitiesByComponents(self.allocator, .{ ecs.MeshComponent, ecs.TransformComponent });
+    pub fn update(self: *Renderer, world: *World, game_state: *GameState) void {
+        const entities_to_submit = world.queryEntitiesByComponents(self.allocator, .{ MeshComponent, TransformComponent });
 
-        const transforms = world.getComponentsForEntities(self.allocator, ecs.TransformComponent, entities_to_submit);
+        const transforms = world.getComponentsForEntities(self.allocator, TransformComponent, entities_to_submit);
         defer self.allocator.free(transforms);
 
-        const meshes = world.getComponentsForEntities(self.allocator, ecs.MeshComponent, entities_to_submit);
+        const meshes = world.getComponentsForEntities(self.allocator, MeshComponent, entities_to_submit);
         defer self.allocator.free(meshes);
+
+        const player_transform = world.getComponent(TransformComponent, game_state.player_id) orelse return;
+        self.camera.position = .{
+            player_transform.position.x,
+            player_transform.position.y,
+            player_transform.position.z
+        };
 
         self.allocator.free(entities_to_submit);
 
@@ -217,15 +229,29 @@ pub const Renderer = struct {
     }
 
     /// Calculates the model matrix
-    pub fn submit(self: *Renderer, transform: ecs.TransformComponent, mesh: ecs.MeshComponent) void {
-        const model_matrix = [_]f32 {
-            transform.scale.x, 0.0, 0.0, 0.0,
-            0.0, transform.scale.y, 0.0, 0.0,
-            0.0, 0.0, transform.scale.z, 0.0,
-            transform.position.x, transform.position.y, transform.position.z, 1.0
-        };
+    pub fn submit(self: *Renderer, transform: TransformComponent, mesh: MeshComponent) void {
+
+        var model_matrix = Matrix4(f32).init(.{
+            .{ transform.scale.x, 0.0, 0.0, 0.0 },
+            .{ 0.0, transform.scale.y, 0.0, 0.0 },
+            .{ 0.0, 0.0, transform.scale.z, 0.0 },
+            .{ transform.position.x, transform.position.y, transform.position.z, 1.0 }
+        });
+
+        if (transform.rotation.x != 0) {
+            model_matrix = model_matrix.multiply(Matrix4(f32).rotateX(transform.rotation.x));
+        }
+
+        if (transform.rotation.y != 0) {
+            model_matrix = model_matrix.multiply(Matrix4(f32).rotateY(transform.rotation.y));
+        }
+
+        if (transform.rotation.z != 0) {
+            model_matrix = model_matrix.multiply(Matrix4(f32).rotateZ(transform.rotation.z));
+        }
+
         self.render_queue.append(self.allocator, .{
-            .model_matrix = model_matrix,
+            .model_matrix = model_matrix.toArray(),
             .mesh_id = mesh.mesh_id,
             .material_id = mesh.material_id
         }) catch @panic(out_of_memory);
