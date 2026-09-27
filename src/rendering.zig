@@ -267,11 +267,12 @@ pub const Renderer = struct {
         var vbo: u32 = 0;
         var ebo: u32 = 0;
 
+        // vertex position (,,) normal (,,) uv(,)
         const vertex_array = [_]f32 {
-            0.0, 0.0, 0.0,   0.0, 0.0,
-            1.0, 0.0, 0.0,   1.0, 0.0,
-            1.0, 0.0, 2.0,   1.0, 2.0,
-            0.0, 0.0, 2.0,   0.0, 2.0
+            0.0, 0.0, 0.0,   1.0, 0.0, 0.0,   0.0, 0.0,
+            1.0, 0.0, 0.0,   1.0, 0.0, 0.0,   1.0, 0.0,
+            1.0, 0.0, 2.0,   1.0, 0.0, 0.0,   1.0, 2.0,
+            0.0, 0.0, 2.0,   1.0, 0.0, 0.0,   0.0, 2.0
         };
 
         const index_array = [_]u32 {
@@ -296,11 +297,15 @@ pub const Renderer = struct {
         c.glBufferData(c.GL_ELEMENT_ARRAY_BUFFER, @sizeOf(@TypeOf(index_array)), &index_array, c.GL_STATIC_DRAW);
 
         // Bind inputs
-        c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 5 * @sizeOf(f32), null);
+        const stride = 8 * @sizeOf(f32);
+        c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, stride, null);
         c.glEnableVertexAttribArray(0);
 
-        c.glVertexAttribPointer(1, 2, c.GL_FLOAT, c.GL_FALSE, 5 * @sizeOf(f32), @ptrFromInt(3 * @sizeOf(f32)));
+        c.glVertexAttribPointer(1, 3, c.GL_FLOAT, c.GL_FALSE, stride, @ptrFromInt(3 * @sizeOf(f32)));
         c.glEnableVertexAttribArray(1);
+
+        c.glVertexAttribPointer(2, 2, c.GL_FLOAT, c.GL_FALSE, stride, @ptrFromInt(6 * @sizeOf(f32)));
+        c.glEnableVertexAttribArray(2);
 
         c.glBindVertexArray(0);
 
@@ -317,11 +322,12 @@ pub const Renderer = struct {
         var vbo: u32 = 0;
         var ebo: u32 = 0;
 
+        // vertex_pos (,,) normal (,,) uv(,)
         const vertex_array = [_]f32 {
-            0.0, 0.0, 0.0,   0.0, 0.0,
-            1.0, 0.0, 0.0,   1.0, 0.0,
-            1.0, 1.0, 0.0,   1.0, 1.0,
-            0.0, 1.0, 0.0,   0.0, 1.0
+            0.0, 0.0, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0,
+            1.0, 0.0, 0.0,   0.0, 0.0, 1.0,   1.0, 0.0,
+            1.0, 1.0, 0.0,   0.0, 0.0, 1.0,   1.0, 1.0,
+            0.0, 1.0, 0.0,   0.0, 0.0, 1.0,   0.0, 1.0
         };
 
         const index_array = [_]u32 {
@@ -346,11 +352,15 @@ pub const Renderer = struct {
         c.glBufferData(c.GL_ELEMENT_ARRAY_BUFFER, @sizeOf(@TypeOf(index_array)), &index_array, c.GL_STATIC_DRAW);
 
         // Bind inputs
-        c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 5 * @sizeOf(f32), null);
+        const stride = 8 * @sizeOf(f32);
+        c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, stride, null);
         c.glEnableVertexAttribArray(0);
 
-        c.glVertexAttribPointer(1, 2, c.GL_FLOAT, c.GL_FALSE, 5 * @sizeOf(f32), @ptrFromInt(3 * @sizeOf(f32)));
+        c.glVertexAttribPointer(1, 3, c.GL_FLOAT, c.GL_FALSE, stride, @ptrFromInt(3 * @sizeOf(f32)));
         c.glEnableVertexAttribArray(1);
+
+        c.glVertexAttribPointer(2, 2, c.GL_FLOAT, c.GL_FALSE, stride, @ptrFromInt(6 * @sizeOf(f32)));
+        c.glEnableVertexAttribArray(2);
 
         c.glBindVertexArray(0);
 
@@ -431,13 +441,18 @@ const vt_shader =
 \\  uniform mat4 u_ModelMatrix;
 \\  uniform mat4 u_ViewMatrix;
 \\  uniform mat4 u_ProjMatrix;
-\\  layout (location = 0) in vec3 position;
-\\  layout (location = 1) in vec2 uv;
+\\  layout (location = 0) in vec3 a_Position;
+\\  layout (location = 1) in vec3 a_Normal;
+\\  layout (location = 2) in vec2 a_UV;
 \\  out vec2 TexCoord;
+\\  out float Lightness;
 \\  void main() {
-\\      vec4 screenPos = u_ProjMatrix * u_ViewMatrix * u_ModelMatrix * vec4(position, 1.0);
+\\      vec4 screenPos = u_ProjMatrix * u_ViewMatrix * u_ModelMatrix * vec4(a_Position, 1.0);
 \\      gl_Position = screenPos;
-\\      TexCoord = uv;
+\\      TexCoord = a_UV;
+\\      vec4 normal = u_ViewMatrix * u_ModelMatrix * vec4(a_Normal, 0.0);
+\\      Lightness = dot(vec3(normal.xyz), vec3(0.4, 0, 1)) / length(normal.xyz);
+\\      Lightness = max(Lightness, 1.1 / max(1, 0.5 * length(u_ViewMatrix * u_ModelMatrix * vec4(a_Position, 1.0))));
 \\  }
 ;
 
@@ -448,12 +463,13 @@ const ft_shader =
 \\  uniform int u_HasTexture;
 \\  uniform vec4 u_Color;
 \\  in vec2 TexCoord;
+\\  in float Lightness;
 \\  void main() {
 \\      vec4 finalColor = u_Color;
 \\      if (u_HasTexture == 1) {
 \\          finalColor *= texture(u_Texture, TexCoord);
 \\      }
-\\      color = finalColor;
+\\      color = finalColor * Lightness;
 \\  }
 ;
 

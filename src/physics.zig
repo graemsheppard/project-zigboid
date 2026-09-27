@@ -71,10 +71,11 @@ pub const CollisionSystem = struct {
                 if (collider_entity == physics_entity) continue;
                 const collider_transform = world.getComponent(TransformComponent, collider_entity) orelse continue;
                 const collider_collider = world.getComponent(ColliderComponent, collider_entity) orelse continue;
-                const is_colliding = checkCollision(
+                const is_colliding, const correction = checkCollision(
                     .{ .collider = physics_collider, .transform = physics_tranform }, 
                     .{ .collider = collider_collider, .transform = collider_transform });
                 if (is_colliding) {
+                    physics_tranform.position -= correction;
                     std.log.debug("Collision: {} and {}", .{ physics_entity, collider_entity });
                 }             
             }
@@ -86,7 +87,7 @@ pub const CollisionSystem = struct {
         transform: *TransformComponent
     };
 
-    fn checkCollision(first: CollisionParams, second: CollisionParams) bool {
+    fn checkCollision(first: CollisionParams, second: CollisionParams) struct { bool, @Vector(3, f32) } {
         return switch(first.collider.*) {
             .rectangle => switch (second.collider.*) {
                 .rectangle => collisionRectRect(first, second),
@@ -99,9 +100,9 @@ pub const CollisionSystem = struct {
         };
     }
 
-    fn collisionRectRect(a: CollisionParams, b: CollisionParams) bool {
+    fn collisionRectRect(a: CollisionParams, b: CollisionParams) struct { bool, @Vector(3, f32) } {
         const big = std.math.floatMax(f32);
-        const small = std.math.floatMin(f32);
+        const small = -std.math.floatMax(f32);
 
         var a_min: @Vector(3, f32) = .{ big, big, big };
         var a_max: @Vector(3, f32) = .{ small, small, small };
@@ -127,13 +128,34 @@ pub const CollisionSystem = struct {
             }
         }
 
+        const a_center = (a_points[0] + a_points[1] + a_points[2] + a_points[3]) / @Vector(3, f32){ 4.0, 4.0, 4.0 };
+        const b_center = (b_points[0] + b_points[1] + b_points[2] + b_points[3]) / @Vector(3, f32){ 4.0, 4.0, 4.0 };
+
         const overlap: @Vector(3, f32) = .{ 
             @min(a_max[0], b_max[0]) - @max(a_min[0], b_min[0]),
             @min(a_max[1], b_max[1]) - @max(a_min[1], b_min[1]),
             @min(a_max[2], b_max[2]) - @max(a_min[2], b_min[2]),
         };
 
-        return overlap[0] > 0 and overlap[1] > 0 and overlap[2] > 0;
+        var correction: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
+        const is_colliding = overlap[0] >= 0 and overlap[1] >= 0 and overlap[2] >= 0;
+
+        if (is_colliding) {
+            if (overlap[0] <= @min(overlap[1], overlap[2])) {
+                const sign: f32 = if (a_center[0] > b_center[0]) -1.0 else 1.0;
+                correction[0] = overlap[0] * sign;
+            } else if (overlap[1] <= @min(overlap[0], overlap[2])) {
+                const sign: f32 = if (a_center[1] > b_center[1]) -1.0 else 1.0;
+                correction[1] = overlap[1] * sign;
+            } else {
+                const sign: f32 = if (a_center[2] > b_center[2]) -1.0 else 1.0;
+                correction[2] = overlap[2] * sign;
+            }
+            std.log.debug("Applying correction: {any}", .{ correction });
+        }
+
+
+        return .{ is_colliding, correction };
     }
 
     fn collisionRectCapsule(_: CollisionParams, _: CollisionParams) bool {
@@ -141,4 +163,4 @@ pub const CollisionSystem = struct {
     }
 };
 
-const gravity_vect: @Vector(3, f32) = .{ 0.0, 0.0, -9.81 };
+const gravity_vect: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };

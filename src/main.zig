@@ -31,7 +31,7 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(1);
     };
 
-    var snail = img.PNG.parse(init.gpa, init.io, "wood_wall.png") catch {
+    var wall = img.PNG.parse(init.gpa, init.io, "wood_wall.png") catch {
         std.process.exit(1);
     };
 
@@ -52,13 +52,13 @@ pub fn main(init: std.process.Init) !void {
 
     const snail_texture_id = texture_store.registerTexture(.{
         .texture_id = renderer.createTexture(.{
-            .color_mode = snail.color_mode,
-            .width = snail.ihdr.width,
-            .height = snail.ihdr.height,
-            .data = snail.raw_image
+            .color_mode = wall.color_mode,
+            .width = wall.ihdr.width,
+            .height = wall.ihdr.height,
+            .data = wall.raw_image
         })
     });
-    snail.deinit();
+    wall.deinit();
 
     const dirt_texture_id = texture_store.registerTexture(.{
         .texture_id = renderer.createTexture(.{
@@ -107,7 +107,7 @@ pub fn main(init: std.process.Init) !void {
     });
 
     world.addComponent(player_id, TransformComponent {
-        .position = .{ 0.0, 0.0, 100 },
+        .position = .{ 0.0, 0.0, 0.0 },
         .rotation = math.vector3_zero,
         .scale = math.vector3_one
     });
@@ -143,6 +143,14 @@ pub fn main(init: std.process.Init) !void {
                 }
             });
         }
+    }
+
+    // Create some walls
+    for (0..4) |idx| {
+        const x_pos: f32 = @floatFromInt(@as(i32, @intCast(idx)) - 2);
+        const wall_id = world.spawnEntity();
+        world.addComponent(wall_id, TransformComponent { .position = .{ x_pos, 2.0, 0.0}, .rotation = math.vector3_zero, .scale = math.vector3_one });
+        world.addComponent(wall_id, wall_mesh);
     }
 
 
