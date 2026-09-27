@@ -1,50 +1,10 @@
 const std = @import("std");
 
-pub fn Vector2(comptime T: type) type {
-    return struct {
-        x: T,
-        y: T,
+pub const vector3_zero = @Vector(3, f32) { 0.0, 0.0, 0.0 };
+pub const vector3_one = @Vector(3, f32) { 1.0, 1.0, 1.0 };
 
-        pub fn init(x: T, y: T) Vector2(T) {
-            return .{
-                .x = x,
-                .y = y
-            };
-        }
-    };
-}
-
-pub fn Vector3(comptime T: type) type {
-    return struct {
-        x: T,
-        y: T,
-        z: T,
-
-        pub fn init(x: T, y: T, z: T) Vector3(T) {
-            return .{
-                .x = x,
-                .y = y,
-                .z = z
-            };
-        }
-
-        pub fn zero() Vector3(T) {
-            return .{
-                .x = 0,
-                .y = 0,
-                .z = 0
-            };
-        }
-
-        pub fn one() Vector3(T) {
-            return .{
-                .x = 1,
-                .y = 1,
-                .z = 1
-            };
-        }
-    };
-}
+pub const vector4_zero = @Vector(4, f32) { 0.0, 0.0, 0.0, 0.0 };
+pub const vector4_one = @Vector(4, f32) { 1.0, 1.0, 1.0, 1.0 };
 
 pub fn Matrix4(comptime T: type) type {
     return struct {

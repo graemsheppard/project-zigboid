@@ -34,8 +34,6 @@ pub const ControlSystem = struct {
 
         const dir_mag: f32 = @sqrt(@reduce(.Add, dir * dir));
         input.direction = dir / @as(@Vector(3, f32), @splat(dir_mag)) * @as(@Vector(3, f32), @splat(0.5 * game_state.dt));
-        transform.position.x += input.direction[0];
-        transform.position.y += input.direction[1];
-        transform.position.z += input.direction[2];
+        transform.position += input.direction;
     }
 };

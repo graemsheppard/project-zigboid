@@ -1,5 +1,4 @@
 const std = @import("std");
-const Vector3 = @import("math.zig").Vector3;
 const Window = @import("c").struct_GLFWwindow;
 
 const initial_capacity = 64;
@@ -20,17 +19,19 @@ pub const World = struct {
     sprite_list: std.ArrayList(?SpriteComponent),
     mesh_list: std.ArrayList(?MeshComponent),
     input_list: std.ArrayList(?InputComponent),
-
+    physics_body_list: std.ArrayList(?PhysicsBodyComponent),
+    collider_list: std.ArrayList(?ColliderComponent),
 
     pub fn init(allocator: std.mem.Allocator) World {
-
         return .{
             .next_entity_id = 1,
             .allocator = allocator,
             .transform_list = std.ArrayList(?TransformComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
             .sprite_list = std.ArrayList(?SpriteComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
             .mesh_list = std.ArrayList(?MeshComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
-            .input_list = std.ArrayList(?InputComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory)
+            .input_list = std.ArrayList(?InputComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
+            .physics_body_list = std.ArrayList(?PhysicsBodyComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
+            .collider_list = std.ArrayList(?ColliderComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory)
         };
     }
 
@@ -39,6 +40,8 @@ pub const World = struct {
         self.sprite_list.deinit(self.allocator);
         self.mesh_list.deinit(self.allocator);
         self.input_list.deinit(self.allocator);
+        self.physics_body_list.deinit(self.allocator);
+        self.collider_list.deinit(self.allocator);
     }
 
     /// Given a component type T returns a pointer to its appropriate component array
@@ -47,6 +50,8 @@ pub const World = struct {
         if (T == TransformComponent) return &self.transform_list;
         if (T == MeshComponent) return &self.mesh_list;
         if (T == InputComponent) return &self.input_list;
+        if (T == PhysicsBodyComponent) return &self.physics_body_list;
+        if (T == ColliderComponent) return &self.collider_list;
         @compileError("Not a supported component type: " ++ @typeName(T));
     } 
 
@@ -60,6 +65,8 @@ pub const World = struct {
         self.sprite_list.append(self.allocator, null) catch @panic(out_of_memory);
         self.mesh_list.append(self.allocator, null) catch @panic(out_of_memory);
         self.input_list.append(self.allocator, null) catch @panic(out_of_memory);
+        self.physics_body_list.append(self.allocator, null) catch @panic(out_of_memory);
+        self.collider_list.append(self.allocator, null) catch @panic(out_of_memory);
 
         return entity_id;
     }
@@ -97,12 +104,34 @@ pub const World = struct {
         return list.toOwnedSlice(allocator) catch @panic(out_of_memory);
     }
 
+    /// Same as queryEntitiesByComponents but takes a list of entity ids to further refine
+    pub fn queryKnownEntitiesByComponents(self: *World, allocator: std.mem.Allocator, known_ids: []usize, args: anytype) []usize {
+        var list = std.ArrayList(usize).initCapacity(allocator, 16) catch @panic(out_of_memory);
+        for (known_ids) |entity_id| {
+            var exists = true;
+            inline for (args) |T| {
+                const comp_list = self.getComponentArray(T);
+                if (comp_list.items[entity_id - 1] == null) {
+                    exists = false;
+                    break;
+                }
+            }
+
+            if (exists) {
+                list.append(allocator, entity_id) catch @panic(out_of_memory);
+            }
+        }
+        return list.toOwnedSlice(allocator) catch @panic(out_of_memory);
+    }
+
+
     /// Returns the components for the requested entities. Component must exist. Caller owns the memory
-    pub fn getComponentsForEntities(self: *World, allocator: std.mem.Allocator, comptime T: type, entity_ids: []const usize) []?T {
-        const result = allocator.alloc(?T, entity_ids.len) catch @panic(out_of_memory);
+    pub fn getComponentsForEntities(self: *World, allocator: std.mem.Allocator, comptime T: type, entity_ids: []const usize) []?*T {
+        const result = allocator.alloc(?*T, entity_ids.len) catch @panic(out_of_memory);
         const comp_list = self.getComponentArray(T);
         for (entity_ids, 0..) |entity_id, idx| {
-            result[idx] = comp_list.items[entity_id - 1];
+            const maybe_comp = &comp_list.items[entity_id - 1];
+            result[idx] = if (maybe_comp.*) |*comp| comp else null;
         }
         return result;
     }
@@ -115,15 +144,52 @@ pub const World = struct {
     }
 };
 
+pub const transform_default = TransformComponent {
+    .position = .{ 0.0, 0.0, 0.0 },
+    .rotation = .{ 0.0, 0.0, 0.0 },
+    .scale = .{ 1.0, 1.0, 1.0 }
+};
+
+pub const RectangleColliderComponent = struct {
+    /// Each point relative to the entity's transform starting with bottom left and going clockwise
+    points: [4]@Vector(3, f32)
+};
+
+pub const CapsuleColliderComponent = struct {
+    /// The mass center position relative to the entity's transform
+    offset: @Vector(3, f32),
+    height: f32,
+    radius: f32
+};
+
+pub const ColliderType = enum {
+    rectangle,
+    capsule
+};
+
+pub const ColliderComponent = union(ColliderType) {
+    const Self = @This();
+
+    rectangle: RectangleColliderComponent,
+    capsule: CapsuleColliderComponent,
+
+};
+
+pub const PhysicsBodyComponent = struct {
+    acceleration: @Vector(3, f32),
+    velocity: @Vector(3, f32),
+    mass: f32
+};
+
 pub const TransformComponent = struct {
-    position: Vector3(f32),
-    rotation: Vector3(f32),
-    scale: Vector3(f32)
+    position: @Vector(3, f32),
+    rotation: @Vector(3, f32),
+    scale: @Vector(3, f32)
 };
 
 pub const SpriteComponent = struct {
     texture_id: u32,
-    color: Color
+    color: @Vector(4, f32)
 };
 
 pub const MeshComponent = struct {
@@ -138,7 +204,7 @@ pub const InputComponent = struct {
 pub const Material = struct {
     // should also have the shader id
     texture_id: ?usize,
-    color: Color
+    color: @Vector(4, f32)
 };
 
 pub const Texture = struct {
@@ -233,21 +299,5 @@ pub const TextureStore = struct {
 
     pub fn get(self: *TextureStore, texture_id: usize) Texture {
         return self.textures.items[texture_id];
-    }
-};
-
-pub const Color = struct {
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
-
-    pub fn white() Color {
-        return .{
-            .r = 1.0,
-            .g = 1.0,
-            .b = 1.0,
-            .a = 1.0
-        };
     }
 };

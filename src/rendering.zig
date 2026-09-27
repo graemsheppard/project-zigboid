@@ -90,7 +90,9 @@ pub const Renderer = struct {
         std.log.info("GLAD Initialized", .{});
 
         c.glClearColor(0, 0, 0.6, 0);
-
+        c.glDepthMask(c.GL_TRUE);
+        c.glEnable(c.GL_DEPTH_TEST);
+        c.glDepthFunc(c.GL_LESS);
 
         std.log.info("Loading shaders...", .{});
         const vt_compile_result = createShader(allocator, c.GL_VERTEX_SHADER, vt_shader);
@@ -165,12 +167,14 @@ pub const Renderer = struct {
 
         const width: i32 = 16;
         const height: i32 = 9;
+        const near: f32 = -100.0;
+        const far: f32 = 100.0;
 
         var proj_matrix = [16]f32 {
             2.0 / @as(f32, @floatFromInt(width)), 0.0, 0.0, 0.0,
             0.0, 2.0 / @as(f32, @floatFromInt(height)), 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 0.0, 0.0, 1.0
+            0.0, 0.0, -2.0 / (far - near), 0.0,
+            0.0, 0.0, -(far + near) / (far - near), 1.0
         };
 
         for (self.render_queue.items) |cmd| {
@@ -180,7 +184,7 @@ pub const Renderer = struct {
 
             // Assign uniforms
             c.glUniform1i(self.has_texture_loc, if (material.texture_id != null) 1 else 0);
-            c.glUniform4fv(self.color_loc, 1, &[_]f32{ material.color.r, material.color.g, material.color.b, material.color.a });
+            c.glUniform4fv(self.color_loc, 1, @ptrCast(&material.color));
             c.glUniformMatrix4fv(self.model_matrix_loc, 1, c.GL_FALSE, &cmd.model_matrix);
             c.glUniformMatrix4fv(self.view_matrix_loc, 1, c.GL_FALSE, &view_matrix.toArray() );
             c.glUniformMatrix4fv(self.proj_matrix_loc, 1, c.GL_FALSE, &proj_matrix );
@@ -213,9 +217,9 @@ pub const Renderer = struct {
 
         const player_transform = world.getComponent(TransformComponent, game_state.player_id) orelse return;
         self.camera.position = .{
-            player_transform.position.x,
-            player_transform.position.y,
-            player_transform.position.z
+            player_transform.position[0],
+            player_transform.position[1],
+            player_transform.position[2]
         };
 
         self.allocator.free(entities_to_submit);
@@ -223,7 +227,8 @@ pub const Renderer = struct {
         for (meshes, 0..) |maybe_mesh, idx| {
             const mesh = maybe_mesh orelse continue;
             const transform = transforms[idx] orelse continue;
-            self.submit(transform, mesh);
+
+            self.submit(transform.*, mesh.*);
         }
 
     }
@@ -232,22 +237,22 @@ pub const Renderer = struct {
     pub fn submit(self: *Renderer, transform: TransformComponent, mesh: MeshComponent) void {
 
         var model_matrix = Matrix4(f32).init(.{
-            .{ transform.scale.x, 0.0, 0.0, 0.0 },
-            .{ 0.0, transform.scale.y, 0.0, 0.0 },
-            .{ 0.0, 0.0, transform.scale.z, 0.0 },
-            .{ transform.position.x, transform.position.y, transform.position.z, 1.0 }
+            .{ transform.scale[0], 0.0, 0.0, 0.0 },
+            .{ 0.0, transform.scale[1], 0.0, 0.0 },
+            .{ 0.0, 0.0, transform.scale[2], 0.0 },
+            .{ transform.position[0], transform.position[1], transform.position[2], 1.0 }
         });
 
-        if (transform.rotation.x != 0) {
-            model_matrix = model_matrix.multiply(Matrix4(f32).rotateX(transform.rotation.x));
+        if (transform.rotation[0] != 0) {
+            model_matrix = model_matrix.multiply(Matrix4(f32).rotateX(transform.rotation[0]));
         }
 
-        if (transform.rotation.y != 0) {
-            model_matrix = model_matrix.multiply(Matrix4(f32).rotateY(transform.rotation.y));
+        if (transform.rotation[1] != 0) {
+            model_matrix = model_matrix.multiply(Matrix4(f32).rotateY(transform.rotation[1]));
         }
 
-        if (transform.rotation.z != 0) {
-            model_matrix = model_matrix.multiply(Matrix4(f32).rotateZ(transform.rotation.z));
+        if (transform.rotation[2] != 0) {
+            model_matrix = model_matrix.multiply(Matrix4(f32).rotateZ(transform.rotation[2]));
         }
 
         self.render_queue.append(self.allocator, .{
@@ -255,6 +260,56 @@ pub const Renderer = struct {
             .mesh_id = mesh.mesh_id,
             .material_id = mesh.material_id
         }) catch @panic(out_of_memory);
+    }
+
+    pub fn createWallBuffer(_: *Renderer) struct { u32, u32, u32, i32 } {
+        var vao: u32 = 0;
+        var vbo: u32 = 0;
+        var ebo: u32 = 0;
+
+        const vertex_array = [_]f32 {
+            0.0, 0.0, 0.0,   0.0, 0.0,
+            1.0, 0.0, 0.0,   1.0, 0.0,
+            1.0, 0.0, 2.0,   1.0, 2.0,
+            0.0, 0.0, 2.0,   0.0, 2.0
+        };
+
+        const index_array = [_]u32 {
+            0, 1, 2,
+            2, 3, 0
+        };
+
+        // Initialization step
+        c.glGenVertexArrays(1, &vao);
+        c.glGenBuffers(1, &vbo);
+        c.glGenBuffers(1, &ebo);
+
+        // Binding step
+        c.glBindVertexArray(vao);
+
+        // Upload data to the vbo
+        c.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
+        c.glBufferData(c.GL_ARRAY_BUFFER, @sizeOf(@TypeOf(vertex_array)), &vertex_array, c.GL_STATIC_DRAW);
+
+        // Upload data to the ebo
+        c.glBindBuffer(c.GL_ELEMENT_ARRAY_BUFFER, ebo);
+        c.glBufferData(c.GL_ELEMENT_ARRAY_BUFFER, @sizeOf(@TypeOf(index_array)), &index_array, c.GL_STATIC_DRAW);
+
+        // Bind inputs
+        c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 5 * @sizeOf(f32), null);
+        c.glEnableVertexAttribArray(0);
+
+        c.glVertexAttribPointer(1, 2, c.GL_FLOAT, c.GL_FALSE, 5 * @sizeOf(f32), @ptrFromInt(3 * @sizeOf(f32)));
+        c.glEnableVertexAttribArray(1);
+
+        c.glBindVertexArray(0);
+
+        return .{
+            vao,
+            vbo,
+            ebo,
+            index_array.len
+        };
     }
 
     pub fn createFloorBuffer(_: *Renderer) struct { u32, u32, u32, i32 } {
@@ -381,7 +436,7 @@ const vt_shader =
 \\  out vec2 TexCoord;
 \\  void main() {
 \\      vec4 screenPos = u_ProjMatrix * u_ViewMatrix * u_ModelMatrix * vec4(position, 1.0);
-\\      gl_Position = vec4(screenPos.xy, 0.0, 1.0);
+\\      gl_Position = screenPos;
 \\      TexCoord = uv;
 \\  }
 ;

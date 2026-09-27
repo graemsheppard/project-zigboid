@@ -6,15 +6,14 @@ const img = @import("img.zig");
 const rendering = @import("rendering.zig");
 const ecs = @import("ecs.zig");
 const control = @import("control.zig");
+const physics = @import("physics.zig");
 const World = ecs.World;
-const Renderer = rendering.Renderer;
 const Camera = rendering.Camera;
 const TransformComponent = ecs.TransformComponent;
 const InputComponent = ecs.InputComponent;
 const SpriteComponent = ecs.SpriteComponent;
-const Vector3 = math.Vector3;
-const Color = ecs.Color;
-const ControlSystem = control.ControlSystem;
+const MeshComponent = ecs.MeshComponent;
+const PhysicsBodyComponent = ecs.PhysicsBodyComponent;
 const GameState = ecs.GameState;
 
 const frame_rate: i64 = 30;
@@ -32,6 +31,10 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(1);
     };
 
+    var snail = img.PNG.parse(init.gpa, init.io, "wood_wall.png") catch {
+        std.process.exit(1);
+    };
+
     // Initialize stores
     var material_store = ecs.MaterialStore.init(arena_allocator);
     var mesh_store = ecs.MeshStore.init(arena_allocator);
@@ -41,11 +44,23 @@ pub fn main(init: std.process.Init) !void {
     defer world.deinit();
 
     // Initialize systems
-    var renderer = Renderer.init(init.gpa, &game_state);
-    var control_system = ControlSystem {};
+    var renderer = rendering.Renderer.init(init.gpa, &game_state);
     defer renderer.deinit();
+    var control_system = control.ControlSystem {};
+    var physics_system = physics.PhysicsSystem.init(init.gpa);
+    var collision_system = physics.CollisionSystem.init(init.gpa);
 
-    const snail_id = texture_store.registerTexture(.{
+    const snail_texture_id = texture_store.registerTexture(.{
+        .texture_id = renderer.createTexture(.{
+            .color_mode = snail.color_mode,
+            .width = snail.ihdr.width,
+            .height = snail.ihdr.height,
+            .data = snail.raw_image
+        })
+    });
+    snail.deinit();
+
+    const dirt_texture_id = texture_store.registerTexture(.{
         .texture_id = renderer.createTexture(.{
             .color_mode = png.color_mode,
             .width = png.ihdr.width,
@@ -55,54 +70,88 @@ pub fn main(init: std.process.Init) !void {
     });
     png.deinit();
 
-    const mat_id = material_store.registerMaterial(.{
-        .color = .white(),
-        .texture_id = snail_id
+    const snail_mat_id = material_store.registerMaterial(.{
+        .color = math.vector4_one,
+        .texture_id = snail_texture_id 
     });
 
-    const player_id = world.spawnEntity();
-    game_state.player_id = player_id;
-    world.addComponent(player_id, InputComponent { .direction = .{ 0.0, 0.0, 0.0 }});
-    world.addComponent(player_id, TransformComponent {
-        .position = Vector3(f32).zero(),
-        .rotation = Vector3(f32).zero(),
-        .scale = Vector3(f32).one()
+    const dirt_mat_id = material_store.registerMaterial(.{
+        .color = math.vector4_one,
+        .texture_id = dirt_texture_id 
     });
 
     const floor_vao, const floor_vbo, const floor_ebo, const index_count = renderer.createFloorBuffer();
     const floor_mesh_id = mesh_store.registerMesh(floor_vao, floor_vbo, floor_ebo, index_count);
 
-    const transform = TransformComponent {
-        .position = Vector3(f32).zero(),
-        .rotation = Vector3(f32).zero(),
-        .scale = Vector3(f32).one()
-    };
+    const wall_vao, const wall_vbo, const wall_ebo, const wall_index_count = renderer.createWallBuffer();
+    const wall_mesh_id = mesh_store.registerMesh(wall_vao, wall_vbo, wall_ebo, wall_index_count);
 
-    const floor_mesh = ecs.MeshComponent {
-        .material_id = mat_id,
+    const floor_mesh = MeshComponent {
+        .material_id = dirt_mat_id,
         .mesh_id = floor_mesh_id
     };
 
-    const floor_1 = world.spawnEntity();
-    world.addComponent(floor_1, transform);
-    world.addComponent(floor_1, floor_mesh);
+    const wall_mesh = MeshComponent {
+        .material_id = snail_mat_id,
+        .mesh_id = wall_mesh_id
+    };
 
-    const floor_2 = world.spawnEntity();
-    world.addComponent(floor_2, TransformComponent { .position = .{ .x = -1.0, .y = 0.0, .z = 0.0 }, .rotation = Vector3(f32).zero(), .scale = Vector3(f32).one() });
-    world.addComponent(floor_2, floor_mesh);
+    const player_id = world.spawnEntity();
+    game_state.player_id = player_id;
+    world.addComponent(player_id, InputComponent { .direction = .{ 0.0, 0.0, 0.0 }});
+    world.addComponent(player_id, wall_mesh);
+    world.addComponent(player_id, PhysicsBodyComponent {
+        .acceleration = math.vector3_zero,
+        .velocity = math.vector3_zero,
+        .mass = 80
+    });
 
-    const floor_3 = world.spawnEntity();
-    world.addComponent(floor_3, TransformComponent { .position = .{ .x = -1.0, .y = -1.0, .z = 0.0 }, .rotation = Vector3(f32).zero(), .scale = Vector3(f32).one() });
-    world.addComponent(floor_3, floor_mesh);
+    world.addComponent(player_id, TransformComponent {
+        .position = .{ 0.0, 0.0, 100 },
+        .rotation = math.vector3_zero,
+        .scale = math.vector3_one
+    });
 
-    const floor_4 = world.spawnEntity();
-    world.addComponent(floor_4, TransformComponent { .position = .{ .x = 0.0, .y = -1.0, .z = 0.0 }, .rotation = Vector3(f32).zero(), .scale = Vector3(f32).one() });
-    world.addComponent(floor_4, floor_mesh);
+    world.addComponent(player_id, ecs.ColliderComponent {
+        .rectangle = ecs.RectangleColliderComponent {
+            .points = .{
+                .{ 0.0, 0.0, 0.0 },
+                .{ 0.0, 0.0, 1.0 },
+                .{ 1.0, 0.0, 1.0 },
+                .{ 1.0, 0.0, 0.0 }
+            }
+        }
+    });
+
+
+    // Create some floors
+    for (0..4) |y_idx| {
+        const y_pos: f32 = @floatFromInt(@as(i32, @intCast(y_idx)) - 2);
+        for (0..4) |x_idx| {
+            const x_pos: f32 = @floatFromInt(@as(i32, @intCast(x_idx)) - 2);
+            const floor_id = world.spawnEntity();
+            world.addComponent(floor_id, TransformComponent { .position = .{ x_pos, y_pos, 0.0 }, .rotation = math.vector3_zero, .scale = math.vector3_one });
+            world.addComponent(floor_id, floor_mesh);
+            world.addComponent(floor_id, ecs.ColliderComponent {
+                .rectangle = ecs.RectangleColliderComponent {
+                    .points = .{
+                        .{ 0.0, 0.0, 0.0 },
+                        .{ 0.0, 1.0, 0.0 },
+                        .{ 1.0, 1.0, 0.0 },
+                        .{ 1.0, 0.0, 0.0 }
+                    }
+                }
+            });
+        }
+    }
+
 
     // The main game loop
     while (!renderer.shouldClose()) {
         const frame_start = std.Io.Clock.awake.now(init.io);
         
+        physics_system.update(&world, &game_state);
+        collision_system.update(&world, &game_state);
         control_system.update(&world, &game_state);
         renderer.update(&world, &game_state);
 
