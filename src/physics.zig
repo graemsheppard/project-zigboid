@@ -3,9 +3,9 @@ const ecs = @import("ecs.zig");
 const math = @import("math.zig");
 const GameState = ecs.GameState;
 const World = ecs.World;
+const Vector3 = math.Vector3;
 const PhysicsBodyComponent = ecs.PhysicsBodyComponent;
 const TransformComponent = ecs.TransformComponent;
-const RectangleColliderComponent = ecs.RectangleColliderComponent;
 const Allocator = std.mem.Allocator;
 const ColliderComponent = ecs.ColliderComponent;
 
@@ -75,7 +75,7 @@ pub const CollisionSystem = struct {
                     .{ .collider = physics_collider, .transform = physics_tranform }, 
                     .{ .collider = collider_collider, .transform = collider_transform });
                 if (is_colliding) {
-                    physics_tranform.position -= correction;
+                    physics_tranform.position += correction;
                     std.log.debug("Collision: {} and {}", .{ physics_entity, collider_entity });
                 }             
             }
@@ -89,78 +89,106 @@ pub const CollisionSystem = struct {
 
     fn checkCollision(first: CollisionParams, second: CollisionParams) struct { bool, @Vector(3, f32) } {
         return switch(first.collider.*) {
-            .rectangle => switch (second.collider.*) {
-                .rectangle => collisionRectRect(first, second),
-                .capsule => unreachable
+            .sphere => switch (second.collider.*) {
+                .sphere => unreachable,
+                .triangle => collisionSphereTriangle(first, second)
             },
-            .capsule => switch (second.collider.*) {
-                .rectangle => unreachable,
-                .capsule => unreachable
+            .triangle => switch (second.collider.*) {
+                .sphere => collisionSphereTriangle(second, first),
+                .triangle => unreachable
             }
         };
     }
 
-    fn collisionRectRect(a: CollisionParams, b: CollisionParams) struct { bool, @Vector(3, f32) } {
-        const big = std.math.floatMax(f32);
-        const small = -std.math.floatMax(f32);
+    fn collisionSphereTriangle(sphere: CollisionParams, triangle: CollisionParams) struct { bool, @Vector(3, f32) } {
+        var triangle_points: [3]@Vector(3, f32) = undefined;
+        const sphere_center = sphere.collider.sphere.offset + sphere.transform.position;
 
-        var a_min: @Vector(3, f32) = .{ big, big, big };
-        var a_max: @Vector(3, f32) = .{ small, small, small };
-
-        var b_min: @Vector(3, f32) = .{ big, big, big };
-        var b_max: @Vector(3, f32) = .{ small, small, small };
-
-        var a_points: [4]@Vector(3, f32) = undefined;
-        inline for (a.collider.rectangle.points, 0..) |point, idx| {
-            a_points[idx] = point + a.transform.position;
-            inline for (0..3) |axis| {
-                if (a_points[idx][axis] < a_min[axis]) a_min[axis] = a_points[idx][axis];
-                if (a_points[idx][axis] > a_max[axis]) a_max[axis] = a_points[idx][axis];
-            }
+        inline for (0..3) |idx| {
+            triangle_points[idx] = triangle.collider.triangle.points[idx] + triangle.transform.position;
         }
 
-        var b_points: [4]@Vector(3, f32) = undefined;
-        inline for (b.collider.rectangle.points, 0..) |point, idx| {
-            b_points[idx] = point + b.transform.position;
-            inline for (0..3) |axis| {
-                if (b_points[idx][axis] < b_min[axis]) b_min[axis] = b_points[idx][axis];
-                if (b_points[idx][axis] > b_max[axis]) b_max[axis] = b_points[idx][axis];
-            }
+        const edge_1 = triangle_points[1] - triangle_points[0];
+        const edge_2 = triangle_points[2] - triangle_points[0];
+        const t_norm = Vector3.normalize(Vector3.cross(edge_1, edge_2));
+        const to_sphere = sphere_center - triangle_points[0];
+        const plane_dist = Vector3.dot(to_sphere, t_norm);
+
+        if (@abs(plane_dist) > sphere.collider.sphere.radius)
+            return .{ false, .{ 0, 0, 0 } };
+
+        const projected_center = sphere_center - @as(@Vector(3, f32), @splat(plane_dist)) * t_norm;
+        const nearest_point = nearestPointOnTriangle(projected_center, triangle_points[0], triangle_points[1], triangle_points[2]);
+        const diff = sphere_center - nearest_point;
+        const dist = Vector3.magnitude(diff);
+        const norm = Vector3.normalize(diff);
+        const correction = norm * @as(@Vector(3, f32), @splat(sphere.collider.sphere.radius - dist));
+
+        if (dist <= sphere.collider.sphere.radius) {
+            std.log.debug("{any} is nearest", .{ nearest_point });
+            return .{ true, correction };
         }
 
-        const a_center = (a_points[0] + a_points[1] + a_points[2] + a_points[3]) / @Vector(3, f32){ 4.0, 4.0, 4.0 };
-        const b_center = (b_points[0] + b_points[1] + b_points[2] + b_points[3]) / @Vector(3, f32){ 4.0, 4.0, 4.0 };
-
-        const overlap: @Vector(3, f32) = .{ 
-            @min(a_max[0], b_max[0]) - @max(a_min[0], b_min[0]),
-            @min(a_max[1], b_max[1]) - @max(a_min[1], b_min[1]),
-            @min(a_max[2], b_max[2]) - @max(a_min[2], b_min[2]),
-        };
-
-        var correction: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
-        const is_colliding = overlap[0] >= 0 and overlap[1] >= 0 and overlap[2] >= 0;
-
-        if (is_colliding) {
-            if (overlap[0] <= @min(overlap[1], overlap[2])) {
-                const sign: f32 = if (a_center[0] > b_center[0]) -1.0 else 1.0;
-                correction[0] = overlap[0] * sign;
-            } else if (overlap[1] <= @min(overlap[0], overlap[2])) {
-                const sign: f32 = if (a_center[1] > b_center[1]) -1.0 else 1.0;
-                correction[1] = overlap[1] * sign;
-            } else {
-                const sign: f32 = if (a_center[2] > b_center[2]) -1.0 else 1.0;
-                correction[2] = overlap[2] * sign;
-            }
-            std.log.debug("Applying correction: {any}", .{ correction });
-        }
-
-
-        return .{ is_colliding, correction };
+        return .{ false, .{ 0, 0, 0 } };
     }
 
-    fn collisionRectCapsule(_: CollisionParams, _: CollisionParams) bool {
-        return true;
+    /// Returns the nearest point on a triangle abc to point p that lies within its plane
+    fn nearestPointOnTriangle(p: @Vector(3, f32), a: @Vector(3, f32), b: @Vector(3, f32), c: @Vector(3, f32)) @Vector(3, f32) {
+        // Check if vertex a is closest
+        const ap = p - a;
+        const ab = b - a;
+        const ac = c - a;
+
+        const d1 = Vector3.dot(ap, ab);
+        const d2 = Vector3.dot(ap, ac);
+
+        if (d1 <= 0 and d2 <= 0)
+            return a;
+
+        // Check if vertex b is closest
+        const bp = p - b;
+
+        const d3 = Vector3.dot(ab, bp);
+        const d4 = Vector3.dot(ac, bp);
+
+        if (d3 >= 0 and d4 <= d3)
+            return b;
+
+        // Check if point is on edge ab
+        const vc = d1 * d4 - d3 * d2;
+        if (vc <= 0 and d1 >= 0 and d3 <= 0) {
+            const v = d1 / (d1 - d3);
+            return a + (ab * @as(@Vector(3, f32), @splat(v)));
+        }
+
+        // Check if vertex c is closest
+        const cp = p - c;
+        const d5 = Vector3.dot(ab, cp);
+        const d6 = Vector3.dot(ac, cp);
+        if (d5 >= 0 and d5 <= d6) 
+            return c;
+
+        // Check if point is on edge ac
+        const vb = d5 * d2 - d1 * d6;
+        if (vb <= 0 and d2 >= 0 and d6 <= 0) {
+            const w = d2 / (d2 - d6);
+            return a + (ac * @as(@Vector(3, f32), @splat(w)));
+        }
+
+        // Check if point is on edge bc
+        const va = d3 * d6 - d5 * d4;
+        if (va <= 0 and (d4 - d3) >= 0 and (d6 - d5) >= 0) {
+            const w = (d4 - d3) / (d4 - d3 + d6 - d5);
+            return b + ((c - b) * @as(@Vector(3, f32), @splat(w)));
+        }
+
+        return p;
     }
+
+    fn collisionTriangleTriangle(_: CollisionParams, _: CollisionParams) struct { bool, @Vector(3, f32) } {
+        return .{ false, .{0,0,0} };
+    }
+
 };
 
-const gravity_vect: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
+const gravity_vect: @Vector(3, f32) = .{ 0.0, 0.0, -1 };

@@ -15,6 +15,7 @@ const SpriteComponent = ecs.SpriteComponent;
 const MeshComponent = ecs.MeshComponent;
 const PhysicsBodyComponent = ecs.PhysicsBodyComponent;
 const GameState = ecs.GameState;
+const Vector3 = math.Vector3;
 
 const frame_rate: i64 = 30;
 const frame_duration_ns: i64 = 1_000_000_000 / frame_rate;
@@ -106,23 +107,18 @@ pub fn main(init: std.process.Init) !void {
         .mass = 80
     });
 
+    world.addComponent(player_id, ecs.ColliderComponent {
+        .sphere = .{
+            .radius = 1,
+            .offset = .{ 1, 0, 1 }
+        }
+    });
+
     world.addComponent(player_id, TransformComponent {
         .position = .{ 0.0, 0.0, 0.0 },
         .rotation = math.vector3_zero,
         .scale = math.vector3_one
     });
-
-    world.addComponent(player_id, ecs.ColliderComponent {
-        .rectangle = ecs.RectangleColliderComponent {
-            .points = .{
-                .{ 0.0, 0.0, 0.0 },
-                .{ 0.0, 0.0, 1.0 },
-                .{ 1.0, 0.0, 1.0 },
-                .{ 1.0, 0.0, 0.0 }
-            }
-        }
-    });
-
 
     // Create some floors
     for (0..4) |y_idx| {
@@ -130,18 +126,15 @@ pub fn main(init: std.process.Init) !void {
         for (0..4) |x_idx| {
             const x_pos: f32 = @floatFromInt(@as(i32, @intCast(x_idx)) - 2);
             const floor_id = world.spawnEntity();
+            if (x_idx == 0 and y_idx == 0) {
+                world.addComponent(floor_id, ecs.ColliderComponent {
+                    .triangle = .{
+                        .points =  .{ .{ -4, -4, 0 }, .{ 4, -4, 0 }, .{ 0, 4, 0 } }
+                    }
+                });
+            }
             world.addComponent(floor_id, TransformComponent { .position = .{ x_pos, y_pos, 0.0 }, .rotation = math.vector3_zero, .scale = math.vector3_one });
             world.addComponent(floor_id, floor_mesh);
-            world.addComponent(floor_id, ecs.ColliderComponent {
-                .rectangle = ecs.RectangleColliderComponent {
-                    .points = .{
-                        .{ 0.0, 0.0, 0.0 },
-                        .{ 0.0, 1.0, 0.0 },
-                        .{ 1.0, 1.0, 0.0 },
-                        .{ 1.0, 0.0, 0.0 }
-                    }
-                }
-            });
         }
     }
 

@@ -150,29 +150,24 @@ pub const transform_default = TransformComponent {
     .scale = .{ 1.0, 1.0, 1.0 }
 };
 
-pub const RectangleColliderComponent = struct {
-    /// Each point relative to the entity's transform starting with bottom left and going clockwise
-    points: [4]@Vector(3, f32)
-};
-
-pub const CapsuleColliderComponent = struct {
-    /// The mass center position relative to the entity's transform
+pub const SphereColliderComponent = struct {
     offset: @Vector(3, f32),
-    height: f32,
     radius: f32
 };
 
+pub const TriangleColliderComponent = struct {
+    points: [3]@Vector(3, f32)
+};
+
 pub const ColliderType = enum {
-    rectangle,
-    capsule
+    sphere,
+    triangle
 };
 
 pub const ColliderComponent = union(ColliderType) {
     const Self = @This();
-
-    rectangle: RectangleColliderComponent,
-    capsule: CapsuleColliderComponent,
-
+    sphere: SphereColliderComponent,
+    triangle: TriangleColliderComponent
 };
 
 pub const PhysicsBodyComponent = struct {

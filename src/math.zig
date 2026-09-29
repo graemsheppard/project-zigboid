@@ -106,3 +106,25 @@ pub fn Matrix4(comptime T: type) type {
 
     };
 }
+
+pub const Vector3 = struct {
+    pub fn normalize(v: @Vector(3, f32)) @Vector(3, f32) {
+        return v / @as(@Vector(3, f32), @splat(magnitude(v)));
+    }
+
+    pub fn magnitude(v: @Vector(3, f32)) f32 {
+        return @sqrt(dot(v, v));
+    }
+
+    pub fn dot(a: @Vector(3, f32), b: @Vector(3, f32)) f32 {
+        return @reduce(.Add, a * b);
+    }
+
+    pub fn cross(a: @Vector(3, f32), b: @Vector(3, f32)) @Vector(3, f32) {
+        return .{ 
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0] 
+        };
+    }
+};

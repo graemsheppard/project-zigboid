@@ -11,6 +11,7 @@ pub const ControlSystem = struct {
     pub fn update(_: *ControlSystem, world: *World, game_state: *GameState) void {
         const input = world.getComponent(InputComponent, game_state.player_id) orelse return;
         const transform  = world.getComponent(TransformComponent, game_state.player_id) orelse return;
+        const physics = world.getComponent(ecs.PhysicsBodyComponent, game_state.player_id) orelse return;
 
         var dir: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
         
@@ -28,6 +29,10 @@ pub const ControlSystem = struct {
 
         if (c.glfwGetKey(game_state.window, c.GLFW_KEY_A) == 1) {
             dir += .{ -1.0, -1.0, 0.0 };
+        }
+
+        if (c.glfwGetKey(game_state.window, c.GLFW_KEY_SPACE) == 1) {
+            physics.velocity[2] = 1;
         }
 
         if (@reduce(.Add, @abs(dir)) == 0)  return;
