@@ -21,6 +21,7 @@ pub const World = struct {
     input_list: std.ArrayList(?InputComponent),
     physics_body_list: std.ArrayList(?PhysicsBodyComponent),
     collider_list: std.ArrayList(?ColliderComponent),
+    animation_list: std.ArrayList(?AnimationComponent),
 
     pub fn init(allocator: std.mem.Allocator) World {
         return .{
@@ -31,7 +32,8 @@ pub const World = struct {
             .mesh_list = std.ArrayList(?MeshComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
             .input_list = std.ArrayList(?InputComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
             .physics_body_list = std.ArrayList(?PhysicsBodyComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
-            .collider_list = std.ArrayList(?ColliderComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory)
+            .collider_list = std.ArrayList(?ColliderComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory),
+            .animation_list = std.ArrayList(?AnimationComponent).initCapacity(allocator, initial_capacity) catch @panic(out_of_memory)
         };
     }
 
@@ -42,6 +44,7 @@ pub const World = struct {
         self.input_list.deinit(self.allocator);
         self.physics_body_list.deinit(self.allocator);
         self.collider_list.deinit(self.allocator);
+        self.animation_list.deinit(self.allocator);
     }
 
     /// Given a component type T returns a pointer to its appropriate component array
@@ -52,6 +55,7 @@ pub const World = struct {
         if (T == InputComponent) return &self.input_list;
         if (T == PhysicsBodyComponent) return &self.physics_body_list;
         if (T == ColliderComponent) return &self.collider_list;
+        if (T == AnimationComponent) return &self.animation_list;
         @compileError("Not a supported component type: " ++ @typeName(T));
     } 
 
@@ -67,6 +71,7 @@ pub const World = struct {
         self.input_list.append(self.allocator, null) catch @panic(out_of_memory);
         self.physics_body_list.append(self.allocator, null) catch @panic(out_of_memory);
         self.collider_list.append(self.allocator, null) catch @panic(out_of_memory);
+        self.animation_list.append(self.allocator, null) catch @panic(out_of_memory);
 
         return entity_id;
     }
@@ -196,6 +201,12 @@ pub const InputComponent = struct {
     direction: @Vector(3, f32)
 };
 
+pub const AnimationComponent = struct {
+    elapsed: f32,
+    animation_id: usize,
+    current_frame: usize
+};
+
 pub const Material = struct {
     // should also have the shader id
     texture_id: ?usize,
@@ -213,6 +224,40 @@ pub const Mesh = struct {
     index_count: i32
 };
 
+pub const Animation = struct {
+    continuous: bool,
+    duration: f32,
+    keyframes: []const f32,
+    textures: []const usize
+};
+
+/// Store meshes for fast lookup
+pub const AnimationStore = struct {
+    animations: std.ArrayList(Animation),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) AnimationStore {
+        const animations = std.ArrayList(Animation).initCapacity(allocator, 16) catch @panic(out_of_memory);
+        return .{
+            .allocator = allocator,
+            .animations = animations 
+        };
+    }
+
+    pub fn deinit(self: *AnimationStore) void {
+        self.animations.deinit(self.allocator);
+    }
+
+    /// Add a mesh to the store and return its id.
+    pub fn registerAnimation(self: *AnimationStore, animation: Animation) usize {
+        self.animations.append(self.allocator, animation) catch @panic(out_of_memory);
+        return self.animations.items.len - 1;
+    }
+
+    pub fn get(self: *AnimationStore, animation_id: usize) Animation {
+        return self.animations.items[animation_id];
+    }
+};
 /// Store meshes for fast lookup
 pub const MeshStore = struct {
     meshes: std.ArrayList(Mesh),

@@ -9,11 +9,14 @@ const ColorMode = img.ColorMode;
 const GameState = ecs.GameState;
 const TransformComponent = ecs.TransformComponent;
 const MeshComponent = ecs.MeshComponent;
+const AnimationComponent = ecs.AnimationComponent;
 const Mesh = ecs.Mesh;
 const Matrix4 = math.Matrix4;
 const RenderCommand = struct {
     mesh_id: usize,
     material_id: usize,
+    maybe_animation_id: ?usize,
+    maybe_animation_frame: ?usize,
     model_matrix: [16]f32
 };
 
@@ -160,7 +163,7 @@ pub const Renderer = struct {
         return c.glfwWindowShouldClose(self.window) != 0;
     }
 
-    pub fn draw(self: *Renderer, material_store: *ecs.MaterialStore, mesh_store: *ecs.MeshStore, texture_store: *ecs.TextureStore) void {
+    pub fn draw(self: *Renderer, material_store: *ecs.MaterialStore, mesh_store: *ecs.MeshStore, texture_store: *ecs.TextureStore, animation_store: *ecs.AnimationStore) void {
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
         c.glUseProgram(self.program_id);
         var view_matrix = self.camera.getViewMatrix();
@@ -180,7 +183,9 @@ pub const Renderer = struct {
         for (self.render_queue.items) |cmd| {
             const mesh = mesh_store.get(cmd.mesh_id);
             const material = material_store.get(cmd.material_id);
-            const maybe_texture = if (material.texture_id) |texture_id| texture_store.get(texture_id) else null;
+            const maybe_texture = if (cmd.maybe_animation_id) |animation_id| texture_store.get(animation_store.get(animation_id).textures[cmd.maybe_animation_frame orelse 0]) 
+                else if (material.texture_id) |texture_id| texture_store.get(texture_id) 
+                else null;
 
             // Assign uniforms
             c.glUniform1i(self.has_texture_loc, if (material.texture_id != null) 1 else 0);
@@ -215,6 +220,9 @@ pub const Renderer = struct {
         const meshes = world.getComponentsForEntities(self.allocator, MeshComponent, entities_to_submit);
         defer self.allocator.free(meshes);
 
+        const animations = world.getComponentsForEntities(self.allocator, AnimationComponent, entities_to_submit);
+        defer self.allocator.free(animations);
+
         const player_transform = world.getComponent(TransformComponent, game_state.player_id) orelse return;
         self.camera.position = .{
             player_transform.position[0],
@@ -227,14 +235,14 @@ pub const Renderer = struct {
         for (meshes, 0..) |maybe_mesh, idx| {
             const mesh = maybe_mesh orelse continue;
             const transform = transforms[idx] orelse continue;
-
-            self.submit(transform.*, mesh.*);
+            const animation = if (animations[idx]) |anim| anim.* else null;
+            self.submit(transform.*, mesh.*, animation);
         }
 
     }
 
     /// Calculates the model matrix
-    pub fn submit(self: *Renderer, transform: TransformComponent, mesh: MeshComponent) void {
+    pub fn submit(self: *Renderer, transform: TransformComponent, mesh: MeshComponent, maybe_animation: ?AnimationComponent) void {
 
         var model_matrix = Matrix4(f32).init(.{
             .{ transform.scale[0], 0.0, 0.0, 0.0 },
@@ -255,10 +263,15 @@ pub const Renderer = struct {
             model_matrix = model_matrix.multiply(Matrix4(f32).rotateZ(transform.rotation[2]));
         }
 
+        const maybe_animation_id = if (maybe_animation) |animation| animation.animation_id else null;
+        const maybe_animation_frame = if (maybe_animation) |animation| animation.current_frame else null;
+
         self.render_queue.append(self.allocator, .{
             .model_matrix = model_matrix.toArray(),
             .mesh_id = mesh.mesh_id,
-            .material_id = mesh.material_id
+            .material_id = mesh.material_id,
+            .maybe_animation_id = maybe_animation_id,
+            .maybe_animation_frame = maybe_animation_frame
         }) catch @panic(out_of_memory);
     }
 

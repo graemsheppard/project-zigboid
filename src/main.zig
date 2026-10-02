@@ -7,6 +7,7 @@ const rendering = @import("rendering.zig");
 const ecs = @import("ecs.zig");
 const control = @import("control.zig");
 const physics = @import("physics.zig");
+const animation = @import("animation.zig");
 const World = ecs.World;
 const Camera = rendering.Camera;
 const TransformComponent = ecs.TransformComponent;
@@ -40,6 +41,7 @@ pub fn main(init: std.process.Init) !void {
     var material_store = ecs.MaterialStore.init(arena_allocator);
     var mesh_store = ecs.MeshStore.init(arena_allocator);
     var texture_store = ecs.TextureStore.init(arena_allocator);
+    var animation_store = ecs.AnimationStore.init(arena_allocator);
 
     var world = World.init(init.gpa);
     defer world.deinit();
@@ -50,6 +52,7 @@ pub fn main(init: std.process.Init) !void {
     var control_system = control.ControlSystem {};
     var physics_system = physics.PhysicsSystem.init(init.gpa);
     var collision_system = physics.CollisionSystem.init(init.gpa);
+    var animation_system = animation.AnimationSystem.init(init.gpa);
 
     const snail_texture_id = texture_store.registerTexture(.{
         .texture_id = renderer.createTexture(.{
@@ -59,6 +62,7 @@ pub fn main(init: std.process.Init) !void {
             .data = wall.raw_image
         })
     });
+
     wall.deinit();
 
     const dirt_texture_id = texture_store.registerTexture(.{
@@ -101,6 +105,20 @@ pub fn main(init: std.process.Init) !void {
     game_state.player_id = player_id;
     world.addComponent(player_id, InputComponent { .direction = .{ 0.0, 0.0, 0.0 }});
     world.addComponent(player_id, wall_mesh);
+
+    const animation_id = animation_store.registerAnimation(ecs.Animation {
+        .textures = &[_]usize { snail_texture_id, dirt_texture_id },
+        .keyframes = &[_]f32 { 0.0, 1.0 },
+        .duration = 2.0,
+        .continuous = true
+    });
+
+    world.addComponent(player_id, ecs.AnimationComponent {
+        .elapsed = 0,
+        .current_frame = 0,
+        .animation_id = animation_id
+    });
+
     world.addComponent(player_id, PhysicsBodyComponent {
         .acceleration = math.vector3_zero,
         .velocity = math.vector3_zero,
@@ -154,9 +172,10 @@ pub fn main(init: std.process.Init) !void {
         physics_system.update(&world, &game_state);
         collision_system.update(&world, &game_state);
         control_system.update(&world, &game_state);
+        animation_system.update(&world, &game_state, &animation_store);
         renderer.update(&world, &game_state);
 
-        renderer.draw(&material_store, &mesh_store, &texture_store);
+        renderer.draw(&material_store, &mesh_store, &texture_store, &animation_store);
 
         // Cap the frame rate
         const elapsed = frame_start.untilNow(init.io, .awake).toNanoseconds();
