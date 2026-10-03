@@ -76,7 +76,6 @@ pub const CollisionSystem = struct {
                     .{ .collider = collider_collider, .transform = collider_transform });
                 if (is_colliding) {
                     physics_tranform.position += correction;
-                    std.log.debug("Collision: {} and {}", .{ physics_entity, collider_entity });
                 }             
             }
         }
@@ -125,7 +124,6 @@ pub const CollisionSystem = struct {
         const correction = norm * @as(@Vector(3, f32), @splat(sphere.collider.sphere.radius - dist));
 
         if (dist <= sphere.collider.sphere.radius) {
-            std.log.debug("{any} is nearest", .{ nearest_point });
             return .{ true, correction };
         }
 

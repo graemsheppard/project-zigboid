@@ -40,7 +40,6 @@ pub fn main(init: std.process.Init) !void {
     // Initialize stores
     var material_store = ecs.MaterialStore.init(arena_allocator);
     var mesh_store = ecs.MeshStore.init(arena_allocator);
-    var texture_store = ecs.TextureStore.init(arena_allocator);
     var animation_store = ecs.AnimationStore.init(arena_allocator);
 
     var world = World.init(init.gpa);
@@ -54,25 +53,22 @@ pub fn main(init: std.process.Init) !void {
     var collision_system = physics.CollisionSystem.init(init.gpa);
     var animation_system = animation.AnimationSystem.init(init.gpa);
 
-    const snail_texture_id = texture_store.registerTexture(.{
-        .texture_id = renderer.createTexture(.{
-            .color_mode = wall.color_mode,
-            .width = wall.ihdr.width,
-            .height = wall.ihdr.height,
-            .data = wall.raw_image
-        })
+    const snail_texture_id = renderer.createTexture(.{
+        .color_mode = wall.color_mode,
+        .width = wall.ihdr.width,
+        .height = wall.ihdr.height,
+        .data = wall.raw_image
     });
 
     wall.deinit();
 
-    const dirt_texture_id = texture_store.registerTexture(.{
-        .texture_id = renderer.createTexture(.{
-            .color_mode = png.color_mode,
-            .width = png.ihdr.width,
-            .height = png.ihdr.height,
-            .data = png.raw_image
-        })
+    const dirt_texture_id = renderer.createTexture(.{
+        .color_mode = png.color_mode,
+        .width = png.ihdr.width,
+        .height = png.ihdr.height,
+        .data = png.raw_image
     });
+
     png.deinit();
 
     const snail_mat_id = material_store.registerMaterial(.{
@@ -84,6 +80,9 @@ pub fn main(init: std.process.Init) !void {
         .color = math.vector4_one,
         .texture_id = dirt_texture_id 
     });
+
+    const sphere_vao, const sphere_vbo, const sphere_ebo, const sphere_index_count = renderer.createSphereBuffer();
+    const sphere_mesh_id = mesh_store.registerMesh(sphere_vao, sphere_vbo, sphere_ebo, sphere_index_count);
 
     const floor_vao, const floor_vbo, const floor_ebo, const index_count = renderer.createFloorBuffer();
     const floor_mesh_id = mesh_store.registerMesh(floor_vao, floor_vbo, floor_ebo, index_count);
@@ -101,13 +100,18 @@ pub fn main(init: std.process.Init) !void {
         .mesh_id = wall_mesh_id
     };
 
+    const sphere_mesh = MeshComponent {
+        .material_id = dirt_mat_id,
+        .mesh_id = sphere_mesh_id
+    };
+
     const player_id = world.spawnEntity();
     game_state.player_id = player_id;
     world.addComponent(player_id, InputComponent { .direction = .{ 0.0, 0.0, 0.0 }});
-    world.addComponent(player_id, wall_mesh);
+    world.addComponent(player_id, sphere_mesh);
 
     const animation_id = animation_store.registerAnimation(ecs.Animation {
-        .textures = &[_]usize { snail_texture_id, dirt_texture_id },
+        .textures = &[_]u32 { snail_texture_id, dirt_texture_id },
         .keyframes = &[_]f32 { 0.0, 1.0 },
         .duration = 2.0,
         .continuous = true
@@ -128,12 +132,12 @@ pub fn main(init: std.process.Init) !void {
     world.addComponent(player_id, ecs.ColliderComponent {
         .sphere = .{
             .radius = 1,
-            .offset = .{ 1, 0, 1 }
+            .offset = .{ 0, 0, 0 }
         }
     });
 
     world.addComponent(player_id, TransformComponent {
-        .position = .{ 0.0, 0.0, 0.0 },
+        .position = .{ 0.0, 0.0, 1.0 },
         .rotation = math.vector3_zero,
         .scale = math.vector3_one
     });
@@ -175,7 +179,7 @@ pub fn main(init: std.process.Init) !void {
         animation_system.update(&world, &game_state, &animation_store);
         renderer.update(&world, &game_state);
 
-        renderer.draw(&material_store, &mesh_store, &texture_store, &animation_store);
+        renderer.draw(&material_store, &mesh_store, &animation_store);
 
         // Cap the frame rate
         const elapsed = frame_start.untilNow(init.io, .awake).toNanoseconds();

@@ -209,7 +209,7 @@ pub const AnimationComponent = struct {
 
 pub const Material = struct {
     // should also have the shader id
-    texture_id: ?usize,
+    texture_id: ?u32,
     color: @Vector(4, f32)
 };
 
@@ -228,10 +228,10 @@ pub const Animation = struct {
     continuous: bool,
     duration: f32,
     keyframes: []const f32,
-    textures: []const usize
+    textures: []const u32 
 };
 
-/// Store meshes for fast lookup
+/// Store animations for fast lookup
 pub const AnimationStore = struct {
     animations: std.ArrayList(Animation),
     allocator: std.mem.Allocator,
@@ -248,7 +248,7 @@ pub const AnimationStore = struct {
         self.animations.deinit(self.allocator);
     }
 
-    /// Add a mesh to the store and return its id.
+    /// Add an animation to the store and return its id.
     pub fn registerAnimation(self: *AnimationStore, animation: Animation) usize {
         self.animations.append(self.allocator, animation) catch @panic(out_of_memory);
         return self.animations.items.len - 1;
@@ -314,30 +314,3 @@ pub const MaterialStore = struct {
     }
 };
 
-/// Store textures for fast lookup. Note the lookup id is not currently the same as the GL texture id.
-pub const TextureStore = struct {
-    textures: std.ArrayList(Texture),
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator) TextureStore {
-        const textures = std.ArrayList(Texture).initCapacity(allocator, 16) catch @panic(out_of_memory);
-        return .{
-            .allocator = allocator,
-            .textures = textures 
-        };
-    }
-
-    pub fn deinit(self: *TextureStore) void {
-        self.textures.deinit(self.allocator);
-    }
-
-    /// Add a texture to the store and return its id.
-    pub fn registerTexture(self: *TextureStore, texture: Texture) usize {
-        self.textures.append(self.allocator, texture) catch @panic(out_of_memory);
-        return self.textures.items.len - 1;
-    }
-
-    pub fn get(self: *TextureStore, texture_id: usize) Texture {
-        return self.textures.items[texture_id];
-    }
-};

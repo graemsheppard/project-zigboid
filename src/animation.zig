@@ -31,7 +31,6 @@ pub const AnimationSystem = struct {
                 } 
                 break :blk 0;
             };
-            std.log.debug("CURRENT FRAME: {}", .{ animation_component.current_frame });
         }
     }
 };

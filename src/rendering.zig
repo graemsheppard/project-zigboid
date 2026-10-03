@@ -12,6 +12,7 @@ const MeshComponent = ecs.MeshComponent;
 const AnimationComponent = ecs.AnimationComponent;
 const Mesh = ecs.Mesh;
 const Matrix4 = math.Matrix4;
+const Vector3 = math.Vector3;
 const RenderCommand = struct {
     mesh_id: usize,
     material_id: usize,
@@ -163,7 +164,7 @@ pub const Renderer = struct {
         return c.glfwWindowShouldClose(self.window) != 0;
     }
 
-    pub fn draw(self: *Renderer, material_store: *ecs.MaterialStore, mesh_store: *ecs.MeshStore, texture_store: *ecs.TextureStore, animation_store: *ecs.AnimationStore) void {
+    pub fn draw(self: *Renderer, material_store: *ecs.MaterialStore, mesh_store: *ecs.MeshStore, animation_store: *ecs.AnimationStore) void {
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
         c.glUseProgram(self.program_id);
         var view_matrix = self.camera.getViewMatrix();
@@ -183,8 +184,8 @@ pub const Renderer = struct {
         for (self.render_queue.items) |cmd| {
             const mesh = mesh_store.get(cmd.mesh_id);
             const material = material_store.get(cmd.material_id);
-            const maybe_texture = if (cmd.maybe_animation_id) |animation_id| texture_store.get(animation_store.get(animation_id).textures[cmd.maybe_animation_frame orelse 0]) 
-                else if (material.texture_id) |texture_id| texture_store.get(texture_id) 
+            const maybe_texture = if (cmd.maybe_animation_id) |animation_id| animation_store.get(animation_id).textures[cmd.maybe_animation_frame orelse 0]
+                else if (material.texture_id) |texture_id| texture_id 
                 else null;
 
             // Assign uniforms
@@ -196,7 +197,7 @@ pub const Renderer = struct {
 
             if (maybe_texture) |texture| {
                 c.glActiveTexture(c.GL_TEXTURE0);
-                c.glBindTexture(c.GL_TEXTURE_2D, texture.texture_id);
+                c.glBindTexture(c.GL_TEXTURE_2D, texture);
                 c.glUniform1i(self.texture_loc, 0);
             }
 
@@ -385,6 +386,137 @@ pub const Renderer = struct {
         };
     }
 
+    pub fn createSphereBuffer(_: *Renderer) struct { u32, u32, u32, i32 } {
+        const phi: f32 = (1.0 + @sqrt(5.0)) / 2.0;
+
+        const mag: f32 = @sqrt(1 + phi * phi);
+        const a: f32 = 1 / mag;
+        const b: f32 = phi / mag;
+    
+        const points = [_]@Vector(3, f32) {
+            .{ 0, -a, -b },
+            .{ 0, a, -b },
+            .{ 0, -a, b },
+            .{ 0, a, b },
+            .{ -a, -b, 0 },
+            .{ a, -b, 0 },
+            .{ -a, b, 0 },
+            .{ a, b, 0 },
+            .{ -b, 0, -a },
+            .{ b, 0, -a },
+            .{ -b, 0, a },
+            .{ b, 0, a },
+        };
+
+        const base_triangles = [_][3]@Vector(3, f32) {
+            .{ points[1], points[6], points[7] },
+            .{ points[1], points[7], points[9] },
+            .{ points[1], points[9], points[0] },
+            .{ points[1], points[0], points[8] },
+            .{ points[1], points[8], points[6] },
+
+            .{ points[2], points[3], points[10] },
+            .{ points[2], points[10], points[4] },
+            .{ points[2], points[4], points[5] },
+            .{ points[2], points[5], points[11] },
+            .{ points[2], points[11], points[3] },
+
+            .{ points[0], points[5], points[4] },
+            .{ points[0], points[4], points[8] },
+            .{ points[7], points[11], points[9] },
+            .{ points[3], points[7], points[6] },
+            .{ points[6], points[8], points[10] },
+
+            .{ points[0], points[9], points[5] },
+            .{ points[6], points[10], points[3] },
+            .{ points[8], points[4], points[10] },
+            .{ points[9], points[11], points[5] },
+            .{ points[7], points[3], points[11] },
+        };
+
+        const triangles = subdivide(4 * base_triangles.len, subdivide(base_triangles.len, base_triangles));
+
+        var vao: u32 = 0;
+        var vbo: u32 = 0;
+        var ebo: u32 = 0;
+
+        var vertex_array: [triangles.len * 8 * 3]f32 = undefined;
+        var index_array: [triangles.len * 3]u32 = undefined;
+        var offset: usize = 0;
+        var idx_offset: u32 = 0;
+        for (triangles) |triangle| {
+            for (triangle) |point| {
+                const target_point = vertex_array[offset..][0..3];
+                const target_norm = vertex_array[offset+3..][0..3];
+                const target_uv = vertex_array[offset+6..][0..2];
+                @memcpy(target_point, &@as([3]f32, point));
+                @memcpy(target_norm, &@as([3]f32, point));
+                @memcpy(target_uv, &[2]f32{ 0.0, 0.0 });
+                index_array[idx_offset] = idx_offset;
+                offset += 8;
+                idx_offset += 1;
+            }
+        }
+
+        // Initialization step
+        c.glGenVertexArrays(1, &vao);
+        c.glGenBuffers(1, &vbo);
+        c.glGenBuffers(1, &ebo);
+
+        // Binding step
+        c.glBindVertexArray(vao);
+
+        // Upload data to the vbo
+        c.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
+        c.glBufferData(c.GL_ARRAY_BUFFER, @sizeOf(@TypeOf(vertex_array)), &vertex_array, c.GL_STATIC_DRAW);
+
+        // Upload data to the ebo
+        c.glBindBuffer(c.GL_ELEMENT_ARRAY_BUFFER, ebo);
+        c.glBufferData(c.GL_ELEMENT_ARRAY_BUFFER, @sizeOf(@TypeOf(index_array)), &index_array, c.GL_STATIC_DRAW);
+
+        // Bind inputs
+        const stride = 8 * @sizeOf(f32);
+        c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, stride, null);
+        c.glEnableVertexAttribArray(0);
+
+        c.glVertexAttribPointer(1, 3, c.GL_FLOAT, c.GL_FALSE, stride, @ptrFromInt(3 * @sizeOf(f32)));
+        c.glEnableVertexAttribArray(1);
+
+        c.glVertexAttribPointer(2, 2, c.GL_FLOAT, c.GL_FALSE, stride, @ptrFromInt(6 * @sizeOf(f32)));
+        c.glEnableVertexAttribArray(2);
+
+        c.glBindVertexArray(0);
+
+        return .{
+            vao,
+            vbo,
+            ebo,
+            index_array.len
+        };
+    }
+
+    /// Takes an array of n triangles and returns an array of n * 4 triangles.
+    fn subdivide(comptime num_triangles: usize, triangles: [num_triangles][3]@Vector(3, f32)) [4 * num_triangles][3]@Vector(3, f32) {
+        var new_triangles: [4 * num_triangles][3]@Vector(3, f32) = undefined;
+        for (triangles, 0..) |triangle, t_idx| {
+            const p1 = Vector3.normalize(triangle[0] + triangle[1]);
+            const p2 = Vector3.normalize(triangle[1] + triangle[2]);
+            const p3 = Vector3.normalize(triangle[2] + triangle[0]);
+
+            const t1 = [3]@Vector(3, f32) { p1, p2, p3 };
+            const t2 = [3]@Vector(3, f32) { triangle[0], p1, p3 };
+            const t3 = [3]@Vector(3, f32) { triangle[1], p2, p1 };
+            const t4 = [3]@Vector(3, f32) { triangle[2], p3, p2 };
+
+            new_triangles[4 * t_idx] = t1;
+            new_triangles[4 * t_idx + 1] = t2;
+            new_triangles[4 * t_idx + 2] = t3;
+            new_triangles[4 * t_idx + 3] = t4;
+        }
+
+        return new_triangles;
+    }
+
     /// Registers a texture_id for the data. No longer need the raw image after this is called. Returns the GL texture id
     pub fn createTexture(_: *Renderer, texture: TextureData) u32 {
         var texture_id: u32 = 0;
@@ -465,7 +597,6 @@ const vt_shader =
 \\      TexCoord = a_UV;
 \\      vec4 normal = u_ViewMatrix * u_ModelMatrix * vec4(a_Normal, 0.0);
 \\      Lightness = dot(vec3(normal.xyz), vec3(0.4, 0, 1)) / length(normal.xyz);
-\\      Lightness = max(Lightness, 1.1 / max(1, 0.5 * length(u_ViewMatrix * u_ModelMatrix * vec4(a_Position, 1.0))));
 \\  }
 ;
 
