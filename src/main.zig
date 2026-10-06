@@ -23,11 +23,6 @@ const frame_duration_ns: i64 = 1_000_000_000 / frame_rate;
 
 pub fn main(init: std.process.Init) !void {
     const arena_allocator = init.arena.allocator();
-    var game_state = GameState {
-        .window = undefined,
-        .player_id = undefined,
-        .dt = @as(f32, @floatFromInt(frame_duration_ns)) / 1_000_000_000
-    };
 
     var png = img.PNG.parse(init.gpa, init.io, "dirt.png") catch {
         std.process.exit(1);
@@ -37,10 +32,35 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(1);
     };
 
-    // Initialize stores
+    // Initialize stores and game state
     var material_store = ecs.MaterialStore.init(arena_allocator);
     var mesh_store = ecs.MeshStore.init(arena_allocator);
+    var mesh_collider_store = ecs.MeshColliderStore.init(arena_allocator);
     var animation_store = ecs.AnimationStore.init(arena_allocator);
+
+    var game_state = GameState {
+        .window = undefined,
+        .player_id = undefined,
+        .dt = @as(f32, @floatFromInt(frame_duration_ns)) / 1_000_000_000,
+        .animation_store = &animation_store,
+        .mesh_store = &mesh_store,
+        .mesh_collider_store = &mesh_collider_store,
+        .material_store = &material_store
+    };
+
+    const wall_collider_asset = mesh_collider_store.registerMesh(ecs.MeshColliderAsset {
+        .triangles = &[_]ecs.TriangleColliderComponent {
+            .{ .points = .{ .{ 0.0, 0.0, 0.0 }, .{ 1.0, 0.0, 0.0 }, .{ 1.0, 0.0, 2.0 } } },
+            .{ .points = .{ .{ 0.0, 0.0, 0.0 }, .{ 1.0, 0.0, 2.0 }, .{ 0.0, 0.0, 2.0 } } }
+        }
+    });
+
+    const floor_collider_asset = mesh_collider_store.registerMesh(ecs.MeshColliderAsset {
+        .triangles = &[_]ecs.TriangleColliderComponent {
+            .{ .points = .{ .{ 0.0, 0.0, 0.0 }, .{ 1.0, 0.0, 0.0 }, .{ 1.0, 1.0, 0.0 } } },
+            .{ .points = .{ .{ 0.0, 0.0, 0.0 }, .{ 1.0, 1.0, 0.0 }, .{ 0.0, 1.0, 0.0 } } }
+        }
+    });
 
     var world = World.init(init.gpa);
     defer world.deinit();
@@ -148,15 +168,14 @@ pub fn main(init: std.process.Init) !void {
         for (0..4) |x_idx| {
             const x_pos: f32 = @floatFromInt(@as(i32, @intCast(x_idx)) - 2);
             const floor_id = world.spawnEntity();
-            if (x_idx == 0 and y_idx == 0) {
-                world.addComponent(floor_id, ecs.ColliderComponent {
-                    .triangle = .{
-                        .points =  .{ .{ -4, -4, 0 }, .{ 4, -4, 0 }, .{ 0, 4, 0 } }
-                    }
-                });
-            }
             world.addComponent(floor_id, TransformComponent { .position = .{ x_pos, y_pos, 0.0 }, .rotation = math.vector3_zero, .scale = math.vector3_one });
             world.addComponent(floor_id, floor_mesh);
+            world.addComponent(floor_id, ecs.ColliderComponent {
+                .mesh = .{
+                    .mesh_id = floor_collider_asset,
+                    .offset = .{ 0.0, 0.0, 0.0 }
+                }
+            });
         }
     }
 
@@ -164,8 +183,14 @@ pub fn main(init: std.process.Init) !void {
     for (0..4) |idx| {
         const x_pos: f32 = @floatFromInt(@as(i32, @intCast(idx)) - 2);
         const wall_id = world.spawnEntity();
-        world.addComponent(wall_id, TransformComponent { .position = .{ x_pos, 2.0, 0.0}, .rotation = math.vector3_zero, .scale = math.vector3_one });
+        world.addComponent(wall_id, TransformComponent { .position = .{ x_pos, 0.0, 0.0}, .rotation = math.vector3_zero, .scale = math.vector3_one });
         world.addComponent(wall_id, wall_mesh);
+        world.addComponent(wall_id, ecs.ColliderComponent {
+            .mesh = .{
+                .mesh_id = wall_collider_asset,
+                .offset = .{ 0.0, 0.0, 0.0 }
+            }
+        });
     }
 
 
@@ -173,9 +198,9 @@ pub fn main(init: std.process.Init) !void {
     while (!renderer.shouldClose()) {
         const frame_start = std.Io.Clock.awake.now(init.io);
         
+        control_system.update(&world, &game_state);
         physics_system.update(&world, &game_state);
         collision_system.update(&world, &game_state);
-        control_system.update(&world, &game_state);
         animation_system.update(&world, &game_state, &animation_store);
         renderer.update(&world, &game_state);
 

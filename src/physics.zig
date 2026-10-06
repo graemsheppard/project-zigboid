@@ -57,7 +57,7 @@ pub const CollisionSystem = struct {
 
     }
 
-    pub fn update(self: *CollisionSystem, world: *World, _: *GameState) void {
+    pub fn update(self: *CollisionSystem, world: *World, game_state: *GameState) void {
         const collider_entities = world.queryEntitiesByComponents(self.allocator, .{ TransformComponent, ColliderComponent });
         defer self.allocator.free(collider_entities);
         const physics_entities = world.queryKnownEntitiesByComponents(self.allocator, collider_entities, .{ PhysicsBodyComponent });
@@ -67,17 +67,28 @@ pub const CollisionSystem = struct {
             const physics_tranform = world.getComponent(TransformComponent, physics_entity) orelse continue;
             const physics_collider = world.getComponent(ColliderComponent, physics_entity) orelse continue;
 
+            var max_correction_dist: f32 = 0;
+            var max_correction: ?@Vector(3, f32) = null;
+
             for (collider_entities) |collider_entity| {
                 if (collider_entity == physics_entity) continue;
                 const collider_transform = world.getComponent(TransformComponent, collider_entity) orelse continue;
                 const collider_collider = world.getComponent(ColliderComponent, collider_entity) orelse continue;
                 const is_colliding, const correction = checkCollision(
                     .{ .collider = physics_collider, .transform = physics_tranform }, 
-                    .{ .collider = collider_collider, .transform = collider_transform });
+                    .{ .collider = collider_collider, .transform = collider_transform },
+                    game_state);
+
                 if (is_colliding) {
-                    physics_tranform.position += correction;
+                    const correction_dist = Vector3.magnitude(correction);
+                    if (max_correction == null or correction_dist > max_correction_dist) {
+                        max_correction = correction;
+                        max_correction_dist = correction_dist;
+                    }
                 }             
             }
+
+            physics_tranform.position += max_correction orelse .{ 0.0, 0.0, 0.0 };
         }
     }
 
@@ -86,17 +97,42 @@ pub const CollisionSystem = struct {
         transform: *TransformComponent
     };
 
-    fn checkCollision(first: CollisionParams, second: CollisionParams) struct { bool, @Vector(3, f32) } {
+    fn checkCollision(first: CollisionParams, second: CollisionParams, game_state: *GameState) struct { bool, @Vector(3, f32) } {
         return switch(first.collider.*) {
             .sphere => switch (second.collider.*) {
                 .sphere => unreachable,
-                .triangle => collisionSphereTriangle(first, second)
+                .triangle => collisionSphereTriangle(first, second),
+                .mesh => collisionSphereMesh(first, second, game_state)
             },
             .triangle => switch (second.collider.*) {
                 .sphere => collisionSphereTriangle(second, first),
-                .triangle => unreachable
+                .triangle => unreachable,
+                .mesh => unreachable
+            },
+            .mesh => switch (second.collider.*) {
+                .sphere => collisionSphereMesh(second, first, game_state),
+                .triangle => unreachable,
+                .mesh => unreachable
             }
         };
+    }
+
+    fn collisionSphereMesh(sphere: CollisionParams, mesh: CollisionParams, game_state: *GameState) struct { bool, @Vector(3, f32) } {
+        const mesh_asset = game_state.mesh_collider_store.get(mesh.collider.mesh.mesh_id);
+        var max_depth: f32 = 0;
+        var max_collision: ?struct { bool, @Vector(3, f32) } = null;
+        for(mesh_asset.triangles) |triangle| {
+            var collider = ecs.ColliderComponent { .triangle = triangle };
+            const check_collision = collisionSphereTriangle(sphere, .{ .collider = &collider, .transform = mesh.transform });
+            if (check_collision.@"0") {
+                const depth = Vector3.magnitude(check_collision.@"1");
+                if (max_collision == null or depth >= max_depth) {
+                    max_collision = check_collision;
+                    max_depth = depth;
+                }
+            }
+        }
+        return max_collision orelse .{ false, .{ 0.0, 0.0, 0.0 }};
     }
 
     fn collisionSphereTriangle(sphere: CollisionParams, triangle: CollisionParams) struct { bool, @Vector(3, f32) } {
@@ -163,7 +199,7 @@ pub const CollisionSystem = struct {
         const cp = p - c;
         const d5 = Vector3.dot(ab, cp);
         const d6 = Vector3.dot(ac, cp);
-        if (d5 >= 0 and d5 <= d6) 
+        if (d6 >= 0 and d5 <= d6) 
             return c;
 
         // Check if point is on edge ac
@@ -175,8 +211,8 @@ pub const CollisionSystem = struct {
 
         // Check if point is on edge bc
         const va = d3 * d6 - d5 * d4;
-        if (va <= 0 and (d4 - d3) >= 0 and (d6 - d5) >= 0) {
-            const w = (d4 - d3) / (d4 - d3 + d6 - d5);
+        if (va <= 0 and (d4 - d3) >= 0 and (d5 - d6) >= 0) {
+            const w = (d4 - d3) / (d4 - d3 + d5 - d6);
             return b + ((c - b) * @as(@Vector(3, f32), @splat(w)));
         }
 
@@ -189,4 +225,43 @@ pub const CollisionSystem = struct {
 
 };
 
-const gravity_vect: @Vector(3, f32) = .{ 0.0, 0.0, -1 };
+const gravity_vect: @Vector(3, f32) = .{ 0.0, 0.0, -1.0 };
+
+test "nearest point in corner A region" {
+    const point: @Vector(3, f32) = .{ -10.0, 0.0, 0.0 };
+
+    const a: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
+    const b: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
+    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 }; // Should be nearest
+
+    const nearest_point = CollisionSystem.nearestPointOnTriangle(point, a, b, c);
+    try std.testing.expectApproxEqRel(a[0], nearest_point[0], 1.0e-6);
+    try std.testing.expectApproxEqRel(a[1], nearest_point[1], 1.0e-6);
+    try std.testing.expectApproxEqRel(a[2], nearest_point[2], 1.0e-6);
+}
+
+test "nearest point in corner B region" {
+    const point: @Vector(3, f32) = .{ 10.0, 0.0, -1 };
+
+    const a: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
+    const b: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
+    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 }; // Should be nearest
+
+    const nearest_point = CollisionSystem.nearestPointOnTriangle(point, a, b, c);
+    try std.testing.expectApproxEqRel(b[0], nearest_point[0], 1.0e-6);
+    try std.testing.expectApproxEqRel(b[1], nearest_point[1], 1.0e-6);
+    try std.testing.expectApproxEqRel(b[2], nearest_point[2], 1.0e-6);
+}
+
+test "nearest point in corner C region" {
+    const point: @Vector(3, f32) = .{ 0.0, 0.0, 10.0 };
+
+    const a: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
+    const b: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
+    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 }; // Should be nearest
+
+    const nearest_point = CollisionSystem.nearestPointOnTriangle(point, a, b, c);
+    try std.testing.expectApproxEqRel(c[0], nearest_point[0], 1.0e-6);
+    try std.testing.expectApproxEqRel(c[1], nearest_point[1], 1.0e-6);
+    try std.testing.expectApproxEqRel(c[2], nearest_point[2], 1.0e-6);
+}

@@ -4,11 +4,15 @@ const Window = @import("c").struct_GLFWwindow;
 const initial_capacity = 64;
 pub const out_of_memory = "Program ran out of memory!";
 
-/// For storing persistent and frequently accessed entities and state that are shared between systems
+/// For storing persistent data, stores, and frequently accessed entities and state that are shared between systems
 pub const GameState = struct {
     window: *Window,
     player_id: usize,
-    dt: f32
+    dt: f32,
+    animation_store: *AnimationStore,
+    material_store: *MaterialStore,
+    mesh_store: *MeshStore,
+    mesh_collider_store: *MeshColliderStore
 };
 
 /// A container for all entities and components
@@ -164,15 +168,26 @@ pub const TriangleColliderComponent = struct {
     points: [3]@Vector(3, f32)
 };
 
+pub const MeshColliderComponent = struct {
+    mesh_id: usize,
+    offset: @Vector(3, f32)
+};
+
+pub const MeshColliderAsset = struct {
+    triangles: []const TriangleColliderComponent
+};
+
 pub const ColliderType = enum {
     sphere,
-    triangle
+    triangle,
+    mesh
 };
 
 pub const ColliderComponent = union(ColliderType) {
     const Self = @This();
     sphere: SphereColliderComponent,
-    triangle: TriangleColliderComponent
+    triangle: TriangleColliderComponent,
+    mesh: MeshColliderComponent
 };
 
 pub const PhysicsBodyComponent = struct {
@@ -282,6 +297,34 @@ pub const MeshStore = struct {
     }
 
     pub fn get(self: *MeshStore, mesh_id: usize) Mesh {
+        return self.meshes.items[mesh_id];
+    }
+};
+
+/// Store mesh colliders for fast lookup
+pub const MeshColliderStore = struct {
+    meshes: std.ArrayList(MeshColliderAsset),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) MeshColliderStore {
+        const meshes = std.ArrayList(MeshColliderAsset).initCapacity(allocator, 16) catch @panic(out_of_memory);
+        return .{
+            .allocator = allocator,
+            .meshes = meshes 
+        };
+    }
+
+    pub fn deinit(self: *MeshColliderStore) void {
+        self.meshes.deinit(self.allocator);
+    }
+
+    /// Add a mesh to the store and return its id.
+    pub fn registerMesh(self: *MeshColliderStore, asset: MeshColliderAsset) usize {
+        self.meshes.append(self.allocator, asset) catch @panic(out_of_memory);
+        return self.meshes.items.len - 1;
+    }
+
+    pub fn get(self: *MeshColliderStore, mesh_id: usize) MeshColliderAsset {
         return self.meshes.items[mesh_id];
     }
 };

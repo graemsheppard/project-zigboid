@@ -32,13 +32,13 @@ pub const ControlSystem = struct {
         }
 
         if (c.glfwGetKey(game_state.window, c.GLFW_KEY_SPACE) == 1) {
-            physics.velocity[2] = 1;
+            physics.velocity[2] = 3;
         }
 
         if (@reduce(.Add, @abs(dir)) == 0)  return;
 
         const dir_mag: f32 = @sqrt(@reduce(.Add, dir * dir));
-        input.direction = dir / @as(@Vector(3, f32), @splat(dir_mag)) * @as(@Vector(3, f32), @splat(0.5 * game_state.dt));
+        input.direction = dir / @as(@Vector(3, f32), @splat(dir_mag)) * @as(@Vector(3, f32), @splat(4 * game_state.dt));
         transform.position += input.direction;
     }
 };
