@@ -232,7 +232,7 @@ test "nearest point in corner A region" {
 
     const a: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
     const b: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
-    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 }; // Should be nearest
+    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 };
 
     const nearest_point = CollisionSystem.nearestPointOnTriangle(point, a, b, c);
     try std.testing.expectApproxEqRel(a[0], nearest_point[0], 1.0e-6);
@@ -245,7 +245,7 @@ test "nearest point in corner B region" {
 
     const a: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
     const b: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
-    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 }; // Should be nearest
+    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 };
 
     const nearest_point = CollisionSystem.nearestPointOnTriangle(point, a, b, c);
     try std.testing.expectApproxEqRel(b[0], nearest_point[0], 1.0e-6);
@@ -258,10 +258,49 @@ test "nearest point in corner C region" {
 
     const a: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
     const b: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
-    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 }; // Should be nearest
+    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 };
 
     const nearest_point = CollisionSystem.nearestPointOnTriangle(point, a, b, c);
     try std.testing.expectApproxEqRel(c[0], nearest_point[0], 1.0e-6);
     try std.testing.expectApproxEqRel(c[1], nearest_point[1], 1.0e-6);
     try std.testing.expectApproxEqRel(c[2], nearest_point[2], 1.0e-6);
+}
+
+test "nearest point in edge AB region" {
+    const point: @Vector(3, f32) = .{ 0.5, 0.0, -1.0 };
+
+    const a: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
+    const b: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
+    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 };
+
+    const nearest_point = CollisionSystem.nearestPointOnTriangle(point, a, b, c);
+    try std.testing.expectApproxEqRel(0.5, nearest_point[0], 1.0e-6);
+    try std.testing.expectApproxEqRel(0.0, nearest_point[1], 1.0e-6);
+    try std.testing.expectApproxEqRel(0.0, nearest_point[2], 1.0e-6);
+}
+
+test "nearest point in edge BC region" {
+    const point: @Vector(3, f32) = .{ 5, 0.0, 0.5 };
+
+    const a: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
+    const b: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
+    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 };
+
+    const nearest_point = CollisionSystem.nearestPointOnTriangle(point, a, b, c);
+    try std.testing.expectApproxEqRel(1.0, nearest_point[0], 1.0e-6);
+    try std.testing.expectApproxEqRel(0.0, nearest_point[1], 1.0e-6);
+    try std.testing.expectApproxEqRel(0.5, nearest_point[2], 1.0e-6);
+}
+
+test "nearest point in edge AC region" {
+    const point: @Vector(3, f32) = .{ 0.0, 0.0, 1.0 };
+
+    const a: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
+    const b: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
+    const c: @Vector(3, f32) = .{ 1.0, 0.0, 1.0 }; 
+
+    const nearest_point = CollisionSystem.nearestPointOnTriangle(point, a, b, c);
+    try std.testing.expectApproxEqRel(0.5, nearest_point[0], 1.0e-6);
+    try std.testing.expectApproxEqRel(0.0, nearest_point[1], 1.0e-6);
+    try std.testing.expectApproxEqRel(0.5, nearest_point[2], 1.0e-6);
 }

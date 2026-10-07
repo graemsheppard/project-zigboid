@@ -4,6 +4,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const glad_include = b.path("deps/glad/include");
+    const glfw_include = b.path("deps/glfw/include");
+    const glfw_lib = b.path("deps/glfw/lib");
+
     // Setup c lib dependencies
     const translate_c = b.addTranslateC(.{
         .root_source_file = b.path("src/c.h"),
@@ -12,8 +16,8 @@ pub fn build(b: *std.Build) void {
         .link_libc = true
     });
 
-    translate_c.addIncludePath(b.path("deps/glad/include/"));
-    translate_c.addIncludePath(.{ .cwd_relative = "/usr/local/include" });
+    translate_c.addIncludePath(glad_include);
+    translate_c.addIncludePath(glfw_include);
 
     const c_mod = translate_c.createModule();
 
@@ -31,23 +35,33 @@ pub fn build(b: *std.Build) void {
 
     const exe_mod = exe.root_module;
 
-    // libglfw3.a should be in /usr/local/lib
-    exe_mod.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
-    exe_mod.addIncludePath(.{ .cwd_relative = "/usr/local/include" });
+    // libglfw3.a should be in deps/glfw/lib
+    exe_mod.addLibraryPath(glfw_lib);
+    exe_mod.addIncludePath(glfw_include);
     exe_mod.linkSystemLibrary("glfw3", .{});
 
     // link GLAD loader
-    exe_mod.addIncludePath(b.path("deps/glad/include"));
+    exe_mod.addIncludePath(glad_include);
     exe_mod.addCSourceFile(.{
         .file = b.path("deps/glad/src/glad.c"),
         .flags = &.{}
     });
 
     // Required by GLFW
-    exe_mod.linkFramework("Cocoa", .{});
-    exe_mod.linkFramework("IOKit", .{});
-    exe_mod.linkFramework("CoreVideo", .{});
-    exe_mod.linkFramework("OpenGL", .{});
+    if (target.result.os.tag == .macos) {
+        exe_mod.linkFramework("Cocoa", .{});
+        exe_mod.linkFramework("QuartzCore", .{});
+        exe_mod.linkFramework("IOKit", .{});
+        exe_mod.linkFramework("CoreVideo", .{});
+        exe_mod.linkFramework("OpenGL", .{});
+    } else if (target.result.os.tag == .windows) {
+        exe_mod.linkSystemLibrary("gdi32", .{});
+        exe_mod.linkSystemLibrary("user32", .{});
+        exe_mod.linkSystemLibrary("shell32", .{});
+        exe_mod.linkSystemLibrary("opengl32", .{});
+    } else {
+        @panic("Operating system not supported.");
+    }
 
     b.installArtifact(exe);
 

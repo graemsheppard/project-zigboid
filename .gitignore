@@ -5,4 +5,5 @@ zig-out/
 /build/
 /build-*/
 /docgen_tmp/
-/resources/*.png
+deps/**/lib
+.DS_Store
